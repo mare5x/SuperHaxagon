@@ -34,6 +34,88 @@ For more information, please refer to <http://unlicense.org/>
 #include <type_traits>
 
 
+#define WRITABLE (PAGE_READWRITE | PAGE_WRITECOPY | PAGE_EXECUTE_READWRITE | PAGE_EXECUTE_WRITECOPY)
+
+
+HMODULE load_dll(HANDLE proc, const wchar_t* dll_path)
+{
+	// write the dll path to process memory 
+	size_t path_len = wcslen(dll_path) + 1;
+	LPVOID remote_string_address = VirtualAllocEx(proc, NULL, path_len * 2, MEM_COMMIT, PAGE_EXECUTE);
+	WriteProcessMemory(proc, remote_string_address, dll_path, path_len * 2, NULL);
+
+	// get the address of the LoadLibrary()
+	HMODULE k32 = GetModuleHandleA("kernel32.dll");
+	LPVOID load_library_adr = GetProcAddress(k32, "LoadLibraryW");
+
+	// create the thread
+	HANDLE thread = CreateRemoteThread(proc, NULL, NULL, (LPTHREAD_START_ROUTINE)load_library_adr, remote_string_address, NULL, NULL);
+
+	// finish and clean up
+	WaitForSingleObject(thread, INFINITE);
+
+	DWORD dll_handle;
+	GetExitCodeThread(thread, &dll_handle);
+
+	CloseHandle(thread);
+
+	VirtualFreeEx(proc, remote_string_address, path_len, MEM_RELEASE);
+
+	return (HMODULE)dll_handle;
+}
+
+
+void unload_dll(HANDLE proc, HMODULE dll_handle)
+{
+	// get the address of the FreeLibrary()
+	HMODULE k32 = GetModuleHandleA("kernel32.dll");
+	LPVOID free_library_adr = GetProcAddress(k32, "FreeLibrary");
+
+	HANDLE thread = CreateRemoteThread(proc, NULL, NULL, (LPTHREAD_START_ROUTINE)free_library_adr, dll_handle, NULL, NULL);
+
+	WaitForSingleObject(thread, INFINITE);
+
+	DWORD exit_code;
+	GetExitCodeThread(thread, &exit_code);
+
+	CloseHandle(thread);
+}
+
+
+DWORD isArrayMatch(HANDLE const proc, DWORD addr, SIZE_T segment_size, std::vector<BYTE> arr, SIZE_T arr_size)
+{
+	std::vector<BYTE> proc_arr(segment_size);
+
+	if (ReadProcessMemory(proc, (LPCVOID)addr, proc_arr.data(), segment_size, NULL) == 0) {
+		printf("Failed to read memory: %u\n", GetLastError());
+		return 0;
+	}
+	auto it = std::search(std::begin(proc_arr), std::end(proc_arr), std::begin(arr), std::end(arr));
+	if (it != std::end(proc_arr)) return addr + std::distance(proc_arr.begin(), it);
+	else return 0;
+}
+
+
+DWORD scanSegments(HANDLE const proc, std::vector<BYTE> arr, SIZE_T size)
+{
+	MEMORY_BASIC_INFORMATION meminfo;
+	LPCVOID addr = 0;
+	DWORD result = 0; 
+
+	while (1) {
+		if (VirtualQueryEx(proc, addr, &meminfo, sizeof(meminfo)) == 0) break;
+
+		if ((meminfo.State & MEM_COMMIT) && (meminfo.Protect & WRITABLE) && (meminfo.Type & MEM_PRIVATE) && !(meminfo.Protect & PAGE_GUARD)) {
+			std::cout << meminfo.BaseAddress << std::endl;
+			result = isArrayMatch(proc, (DWORD)meminfo.BaseAddress, meminfo.RegionSize, arr, size);
+			if (result != 0) return result;
+		}
+		addr = (unsigned char*)meminfo.BaseAddress + meminfo.RegionSize;
+	}
+	return 0;
+}
+
+
 struct Memory
 {
 	HANDLE const hProcess;
@@ -49,31 +131,19 @@ struct Memory
 		}
 	}
 
-	template <typename T>
-	inline T Read(DWORD address) const
+	inline DWORD Read(DWORD address) const
 	{
-		static_assert(std::is_pod<T>::value, "T must be plain old data.");
+		DWORD data = 0;
+		ReadProcessMemory(hProcess, reinterpret_cast<LPCVOID>(address), &data, sizeof(DWORD), NULL);
 
-		T data = {0};
-		SIZE_T numRead = -1;
-		auto success = ReadProcessMemory(hProcess, reinterpret_cast<LPCVOID>(address), 
-			&data, sizeof(T), &numRead);
-
-		assert(success && numRead == sizeof(T));
-		
 		return data;
 	}
 
-	template <typename T>
-	inline T& Read(DWORD address, T& data) const
+	inline DWORD& Read(DWORD address, DWORD& data) const
 	{
-		static_assert(std::is_pod<T>::value, "T must be plain old data.");
-
 		SIZE_T numRead = -1;
 		auto success = ReadProcessMemory(hProcess, reinterpret_cast<LPCVOID>(address), 
-			&data, sizeof(T), &numRead);
-
-		assert(success && numRead == sizeof(T));
+			&data, sizeof(DWORD), &numRead);
 
 		return data;
 	}
@@ -83,20 +153,16 @@ struct Memory
 		SIZE_T numRead = -1;
 		auto success = ReadProcessMemory(hProcess, reinterpret_cast<LPCVOID>(address),
 			buffer, length, &numRead);
-
-		assert(success && numRead == length);
 	}
 
 	template <typename T>
-	inline void Write(DWORD address, T data) const
+	inline void Write(T address, T data) const
 	{
 		static_assert(std::is_pod<T>::value, "T must be plain old data.");
 
 		SIZE_T numWritten = -1;
 		auto success = WriteProcessMemory(hProcess, reinterpret_cast<LPVOID>(address),
 			&data, sizeof(T), &numWritten);
-
-		assert(success && numWritten == sizeof(T));
 	}
 };
 
@@ -122,8 +188,6 @@ struct SuperHexagonApi
 	{
 		enum : DWORD
 		{
-			BasePointer = 0x694B00,
-
 			NumSlots = 0x1BC,
 			NumWalls = 0x2930,
 			FirstWall = 0x220,
@@ -143,18 +207,20 @@ struct SuperHexagonApi
 	SuperHexagonApi(Memory const& memory)
 		: memory(memory)
 	{
-		appBase = memory.Read<DWORD>(Offsets::BasePointer);
+		// magic numbers array that finds the base pointer
+		std::vector<BYTE> arr = { 0x9C, 0xEF, 0x5D, 0, 0x88, 0xEF, 0x5D, 0 };
+		appBase = scanSegments(memory.hProcess, arr, arr.size());
 		assert(appBase != 0);
 	}
 
 	DWORD GetNumSlots() const
 	{
-		return memory.Read<DWORD>(appBase + Offsets::NumSlots);
+		return memory.Read(appBase + Offsets::NumSlots);
 	}
 
 	DWORD GetNumWalls() const
 	{
-		return memory.Read<DWORD>(appBase + Offsets::NumWalls);
+		return memory.Read(appBase + Offsets::NumWalls);
 	}
 
 	void UpdateWalls()
@@ -167,7 +233,7 @@ struct SuperHexagonApi
 
 	DWORD GetPlayerAngle() const
 	{
-		return memory.Read<DWORD>(appBase + Offsets::PlayerAngle);
+		return memory.Read(appBase + Offsets::PlayerAngle);
 	}
 
 	void SetPlayerSlot(DWORD slot) const
@@ -205,7 +271,7 @@ struct SuperHexagonApi
 
 	DWORD GetWorldAngle() const
 	{
-		return memory.Read<DWORD>(appBase + Offsets::WorldAngle);
+		return memory.Read(appBase + Offsets::WorldAngle);
 	}
 
 	void SetWorldAngle(DWORD angle) const
@@ -216,20 +282,23 @@ struct SuperHexagonApi
 
 int main(int argc, char** argv, char** env)
 {
-	auto hWnd = FindWindow(nullptr, L"Super Hexagon");
+	auto hWnd = FindWindow(nullptr, "Super Hexagon");
 	assert(hWnd);
 
 	DWORD processId = -1;
 	GetWindowThreadProcessId(hWnd, &processId);
 	assert(processId > 0);
 
-	auto const hProcess = OpenProcess(
-		PROCESS_VM_READ |     // For ReadProcessMemory
-		PROCESS_VM_WRITE |    // For WriteProcessMemory
-		PROCESS_VM_OPERATION, // For WriteProcessMemory
-		FALSE, processId);
-
+	auto const hProcess = OpenProcess(PROCESS_ALL_ACCESS, FALSE, processId);
 	assert(hProcess);
+
+	HMODULE dll_handle = load_dll(hProcess, L"c:\\users\\mare5\\projects\\hacking\\SuperHaxagon\\Debug\\SuperHaxagonDLL.dll");
+	printf("%x\n", dll_handle);
+	CloseHandle(dll_handle);
+
+	CloseHandle(hProcess);
+
+	return 0;
 
 	Memory const memory(hProcess);
 	SuperHexagonApi api(memory);
@@ -246,6 +315,7 @@ int main(int argc, char** argv, char** env)
 				}
 			});
 
+			// find slot furthest away (safest)
 			auto const maxElement = std::max_element(minDistances.begin(), minDistances.end());
 			DWORD const targetSlot = static_cast<DWORD>(std::distance(minDistances.begin(), maxElement));
 			std::cout << "Moving to slot [" << targetSlot << "]; world angle is: " << api.GetWorldAngle() << ".\n";
