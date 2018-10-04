@@ -123,5 +123,10 @@ MemoryRegion next_memory_page(DWORD base_adr, DWORD protection = PAGE_EXECUTE_RE
 MemoryRegion first_memory_page(DWORD protection = PAGE_EXECUTE_READWRITE);
 
 
-/* Returns the base address of the first matched signature in a memory page with the given protection, or 0 if it doesn't exist. */
+/** Returns the base address of the first matched signature in a memory page with the given protection, or 0 if it doesn't exist. 
+	O(N) search (fast) but sometimes innacurate. */
 DWORD find_signature(const BYTE signature[], size_t size, DWORD protection = PAGE_EXECUTE_READWRITE);
+
+
+/* Returns the base address of the current process (.exe). */
+inline DWORD get_proc_address() { return (DWORD)GetModuleHandle(NULL); }

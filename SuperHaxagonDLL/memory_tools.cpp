@@ -121,8 +121,6 @@ MemoryRegion first_memory_page(DWORD protection)
 	return next_memory_page(0, protection);
 }
 
-/** Note: Cuphead uses JIT(just in time) compilation, so make sure the desired
-	function has been assembled in memory before running this function. */
 DWORD find_signature(const BYTE signature[], size_t size, DWORD protection)
 {
 	MemoryRegion page = first_memory_page(protection);
