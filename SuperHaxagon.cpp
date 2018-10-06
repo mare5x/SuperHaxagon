@@ -294,7 +294,6 @@ int main(int argc, char** argv, char** env)
 
 	HMODULE dll_handle = load_dll(hProcess, L"c:\\users\\mare5\\projects\\hacking\\SuperHaxagon\\Debug\\SuperHaxagonDLL.dll");
 	printf("%x\n", dll_handle);
-	CloseHandle(dll_handle);
 
 	CloseHandle(hProcess);
 
