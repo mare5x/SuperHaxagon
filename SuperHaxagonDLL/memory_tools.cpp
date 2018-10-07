@@ -65,12 +65,13 @@ void jump_unhook(DWORD hook_at, const BYTE * original_bytes, size_t size)
 }
 
 
-/* Delete[] the returned buffer. */
+/* Delete[] the returned buffer. Crashes if the code to be replaced at hook_at contains
+   a CALL or other relative jump instruction. */
 BYTE* detour_hook(DWORD hook_at, DWORD detour, size_t length)
 {
-	BYTE* post_detour_cave = new BYTE[length + JMP_SIZE];	 // a code cave directly in the target process' memory
-	memcpy(post_detour_cave, (BYTE*)hook_at, length);  // copy original code
-	post_detour_cave[length] = 0xE9;					 // add JMP back to original code (hook_at + ...)
+	BYTE* post_detour_cave = new BYTE[length + JMP_SIZE];	// a code cave directly in the target process' memory
+	memcpy(post_detour_cave, (BYTE*)hook_at, length);		// copy original code
+	post_detour_cave[length] = 0xE9;						// add JMP back to original code (hook_at + ...)
 	*(DWORD*)(post_detour_cave + length + 1) = (hook_at + length) - ((DWORD)(post_detour_cave)+length + 5);
 
 	DWORD old_protection = protect_memory<BYTE[JMP_SIZE]>(hook_at, PAGE_EXECUTE_READWRITE);
