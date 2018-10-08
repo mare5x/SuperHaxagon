@@ -3,6 +3,37 @@
 #include "glut_hook.h"
 
 
+namespace fmodex {
+	typedef int(__stdcall *p_FMOD_System_GetWaveData)(
+		void* system,
+		float* wavearray,
+		int numvalues,
+		int channeloffset
+	);
+
+	HMODULE fmodex_dll;
+	p_FMOD_System_GetWaveData FMOD_System_GetWaveData;
+
+	void* _system;
+
+	bool _hooked = false;
+
+	void init(DWORD base_adr)
+	{
+		fmodex_dll = GetModuleHandle(L"fmodex.dll");
+		FMOD_System_GetWaveData = (p_FMOD_System_GetWaveData)GetProcAddress(fmodex_dll, "FMOD_System_GetWaveData");
+		_system = read_memory<void*>(base_adr + 0x28da88);  // this is where superhexagon.exe stores the required 'system' parameter
+
+		_hooked = true;
+	}
+
+	bool is_hooked()
+	{
+		return _hooked;
+	}
+}
+
+
 enum MENU_OPTION : int {
 	DEBUG_STRINGS, AUTOPLAY, CONSOLE, ZOOM
 };
@@ -25,6 +56,7 @@ bool setting_zoom = false;
 
 HMODULE g_dll;
 HWND g_hwnd;
+DWORD g_proc_adr;  // superhexagon.exe address
 
 WNDPROC orig_wnd_proc;
 
@@ -36,6 +68,7 @@ DWORD render_call_adr;		// the new CALL address
 std::array<BYTE, 5> orig_render_bytes;
 
 
+// Function declarations in this file.
 void open_console();
 void close_console();
 LRESULT CALLBACK input_handler(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam);
@@ -130,12 +163,18 @@ void __declspec(naked) render_trampoline()
 
 void SuperHaxagon::draw()
 {	
-	/*
-	glPushMatrix();
-	glTranslated(768/2, 480/2, 0);
-	glutWireSphere(250, 50, 50);
-	glPopMatrix();
-	*/
+	if (fmodex::is_hooked()) {
+		static float arr[1024];
+		fmodex::FMOD_System_GetWaveData(fmodex::_system, arr, 1024, 0);
+		float avg = 0;
+		for (int i = 0; i < 1024; ++i)
+			avg += abs(arr[i]) / 1024;
+			
+		glPushMatrix();
+		glTranslated(768/2, 480/2, 0);
+		glutWireSphere(256 * avg, 16, 16);
+		glPopMatrix();
+	}
 
 	super.update();
 
@@ -203,6 +242,8 @@ void SuperHaxagon::hook(HMODULE dll)
 	printf("SuperStruct base: %x\n", super.base_adr);
 
 	g_dll = dll;
+	g_proc_adr = get_proc_address();
+
 	hook_glut(WINDOW_TITLE);
 	g_hwnd = FindWindowA(NULL, WINDOW_TITLE);
 
@@ -214,11 +255,13 @@ void SuperHaxagon::hook(HMODULE dll)
 	// allows us to set the GL state before the game draws its own stuff.
 	// Special care when hooking, because we are hooking a CALL instruction. That means we can't 
 	// just execute that same instruction from somewhere else, since the CALL contains a relative address.
-	render_adr = get_proc_address() + 0x75B6D;
+	render_adr = g_proc_adr + 0x75B6D;
 	memcpy(orig_render_bytes.data(), (BYTE*)render_adr, orig_render_bytes.size());
 	jump_hook(render_adr, (DWORD)&render_trampoline, 5);
-	render_call_adr = get_proc_address() + 0x653d0;
+	render_call_adr = g_proc_adr + 0x653d0;
 	render_return_adr = render_adr + 5;
+
+	fmodex::init(g_proc_adr);
 }
 
 
