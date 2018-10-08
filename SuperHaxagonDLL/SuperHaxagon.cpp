@@ -4,7 +4,7 @@
 
 
 enum MENU_OPTION : int {
-	DEBUG_STRINGS, AUTOPLAY, CONSOLE
+	DEBUG_STRINGS, AUTOPLAY, CONSOLE, ZOOM
 };
 
 const double PI = acos(-1);
@@ -18,6 +18,7 @@ int mouse_x, mouse_y;
 bool setting_auto_play = true;
 bool setting_debug_strings = true;
 bool setting_console = true;
+bool setting_zoom = false;
 
 HMODULE g_dll;
 HWND g_hwnd;
@@ -85,15 +86,18 @@ void __stdcall hooked_render()
 {
 	// Executed before any rendering happens in Super Hexagon's main thread.
 
+	// glad must be initialized to use gl functions.
 	if (!glut_hook::gl_is_hooked()) {
 		glut_hook::init_gl();
 	}
 
-	// Zoom out by translating the 'z' coordinate.
-	//glTranslatef(0, 0, -500);
+	if (setting_zoom) {
+		// Zoom out by translating the 'z' coordinate.
+		glTranslatef(0, 0, -500);
 
-	// or zoom out by setting the ortho projection matrix.
-	//glOrtho(0, 5, 0, 5, 0, 1);
+		// or zoom out by setting the ortho projection matrix.
+		//glOrtho(0, 4, 0, 4, 0, 1);
+	}
 }
 
 
@@ -242,6 +246,10 @@ void glut_menu_func(int value)
 		setting_console = !setting_console;
 		if (setting_console) open_console();
 		else close_console();
+		break;
+	case MENU_OPTION::ZOOM:
+		setting_zoom = !setting_zoom;
+		break;
 	default:
 		break;
 	}
@@ -266,6 +274,7 @@ void hook_glut(const char* title)
 	glutAddMenuEntry("Enable/disable autoplay", MENU_OPTION::AUTOPLAY);
 	glutAddMenuEntry("Show/hide debug lines", MENU_OPTION::DEBUG_STRINGS);
 	glutAddMenuEntry("Open/close debug console", MENU_OPTION::CONSOLE);
+	glutAddMenuEntry("Enable/disable zoom out", MENU_OPTION::ZOOM);
 	glutAttachMenu(GLUT_MIDDLE_BUTTON);
 
 	//WINDOW_WIDTH = 1600;
