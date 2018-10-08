@@ -13,6 +13,9 @@ int WINDOW_WIDTH = 768;
 int WINDOW_HEIGHT = 480;
 const char* WINDOW_TITLE = "H4X0R";
 
+// Used to allow window resizing. 
+RECT window_rect = { 0, 0, WINDOW_WIDTH, WINDOW_HEIGHT };
+
 int mouse_x, mouse_y;
 
 bool setting_auto_play = true;
@@ -77,6 +80,12 @@ LRESULT CALLBACK input_handler(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lPara
 		// Use the Q and E keys to move the player cursor to the next or previous slot.
 		super.set_player_slot((super.get_player_slot() + (wParam == 0x51 ? 1 : -1)) % super.get_polygon_sides());
 	}
+
+	// Allow window resizing:
+	if (uMsg == WM_SIZING)
+		window_rect = *(RECT*)lParam;
+	if (uMsg == WM_EXITSIZEMOVE)
+		glutReshapeWindow(window_rect.right - window_rect.left, window_rect.bottom - window_rect.top);
 
 	return orig_wnd_proc(hwnd, uMsg, wParam, lParam);
 }
@@ -276,10 +285,6 @@ void hook_glut(const char* title)
 	glutAddMenuEntry("Open/close debug console", MENU_OPTION::CONSOLE);
 	glutAddMenuEntry("Enable/disable zoom out", MENU_OPTION::ZOOM);
 	glutAttachMenu(GLUT_MIDDLE_BUTTON);
-
-	//WINDOW_WIDTH = 1600;
-	//WINDOW_HEIGHT = 900;
-	//glutReshapeWindow(WINDOW_WIDTH, WINDOW_HEIGHT);
 }
 
 
@@ -290,6 +295,8 @@ void unhook_glut()
 	glutPassiveMotionFunc(NULL);
 
 	glutSetWindowTitle("Super Hexagon");
+
+	glutReshapeWindow(WINDOW_WIDTH, WINDOW_HEIGHT);
 }
 
 
