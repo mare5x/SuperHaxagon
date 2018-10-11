@@ -15,6 +15,8 @@ namespace SuperHaxagon {
 
 		void update() { update_walls(); }
 
+		bool is_fullscreen() const { return read_memory<bool>(base_adr + 0x24); }
+
 		int get_mouse_x() const { return read_offset<int>(MOUSE_X); }
 		int get_mouse_y() const { return read_offset<int>(MOUSE_Y); }
 

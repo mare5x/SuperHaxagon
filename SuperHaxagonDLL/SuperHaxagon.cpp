@@ -40,12 +40,12 @@ enum MENU_OPTION : int {
 
 const double PI = acos(-1);
 
-int WINDOW_WIDTH = 768;
-int WINDOW_HEIGHT = 480;
 const char* WINDOW_TITLE = "H4X0R";
+int VIEWPORT_WIDTH = 768;
+int VIEWPORT_HEIGHT = 480;
 
 // Used to allow window resizing. 
-RECT window_rect = { 0, 0, WINDOW_WIDTH, WINDOW_HEIGHT };
+RECT window_rect = { 0, 0, 768, 480};
 
 int mouse_x, mouse_y;
 
@@ -163,7 +163,21 @@ void __declspec(naked) render_trampoline()
 
 void SuperHaxagon::draw()
 {	
+	static bool was_fullscreen = false;
+	if (was_fullscreen != super.is_fullscreen()) {
+		was_fullscreen = !was_fullscreen;
+		if (was_fullscreen) {
+			VIEWPORT_WIDTH = glutGet(GLUT_SCREEN_WIDTH);
+			VIEWPORT_HEIGHT = glutGet(GLUT_SCREEN_HEIGHT);
+		}
+		else {
+			VIEWPORT_WIDTH = 768;
+			VIEWPORT_HEIGHT = 480;
+		}
+	}
+
 	if (fmodex::is_hooked()) {
+		// Draw a pulsing sphere based on the audio data.
 		static float arr[1024];
 		fmodex::FMOD_System_GetWaveData(fmodex::_system, arr, 1024, 0);
 		float avg = 0;
@@ -171,7 +185,7 @@ void SuperHaxagon::draw()
 			avg += abs(arr[i]) / 1024;
 			
 		glPushMatrix();
-		glTranslated(768/2, 480/2, 0);
+		glTranslated(VIEWPORT_WIDTH / 2, VIEWPORT_HEIGHT / 2, 0);
 		glutWireSphere(256 * avg, 16, 16);
 		glPopMatrix();
 	}
@@ -193,9 +207,10 @@ void SuperHaxagon::draw()
 
 	glPushMatrix();
 	// Make the camera origin be the center of the screen.
-	glTranslated(WINDOW_WIDTH / 2, WINDOW_HEIGHT / 2, 0);
+	glTranslated(VIEWPORT_WIDTH / 2, VIEWPORT_HEIGHT / 2, 0);
 
 	// Find the closest walls for each slot. Then move to the slot, whose closest wall is the farthest away.
+	// A slot can have multiple walls.
 	DWORD slots = super.get_polygon_sides();
 	DWORD min_dist[6] = {};
 	for (int i = 0; i < slots; ++i) min_dist[i] = 0xffff;
@@ -339,7 +354,8 @@ void unhook_glut()
 
 	glutSetWindowTitle("Super Hexagon");
 
-	glutReshapeWindow(WINDOW_WIDTH, WINDOW_HEIGHT);
+	if (!super.is_fullscreen())
+		glutReshapeWindow(glutGet(GLUT_INIT_WINDOW_WIDTH), glutGet(GLUT_INIT_WINDOW_HEIGHT));
 }
 
 
