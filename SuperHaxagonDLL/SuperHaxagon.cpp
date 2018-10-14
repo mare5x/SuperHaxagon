@@ -53,6 +53,7 @@ bool setting_auto_play = true;
 bool setting_debug_strings = true;
 bool setting_console = true;
 bool setting_zoom = false;
+int setting_rotation_type = -1;
 
 HMODULE g_dll;
 HWND g_hwnd;
@@ -77,6 +78,7 @@ void __stdcall hooked_render();
 
 void glut_mouse_move_event(int x, int y);
 void glut_menu_func(int value);
+void glut_rotation_speed_menu_func(int option);
 
 void hook_glut(const char* title);
 void unhook_glut();
@@ -140,6 +142,9 @@ void __stdcall hooked_render()
 		// or zoom out by setting the ortho projection matrix.
 		//glOrtho(0, 4, 0, 4, 0, 1);
 	}
+
+	if (setting_rotation_type != -1)
+		super.set_world_rotation_type(static_cast<SuperHaxagon::SuperStruct::WORLD_ROTATION_OPTIONS>(setting_rotation_type));
 }
 
 
@@ -323,6 +328,12 @@ void glut_menu_func(int value)
 }
 
 
+void glut_rotation_speed_menu_func(int option)
+{
+	setting_rotation_type = option;
+}
+
+
 void hook_glut(const char* title)
 {
 	glut_hook::hook_SwapBuffers(&SuperHaxagon::draw);
@@ -337,11 +348,25 @@ void hook_glut(const char* title)
 
 	// Middle mouse click menu:
 	// Activating the menu also works as an in-game pause!
+	typedef SuperHaxagon::SuperStruct::WORLD_ROTATION_OPTIONS ROTATION_OPTIONS;
+	int rotation_speed_menu = glutCreateMenu(&glut_rotation_speed_menu_func);
+	glutAddMenuEntry("DEFAULT", -1);
+	glutAddMenuEntry("CW_SLOW", ROTATION_OPTIONS::CW_SLOW);
+	glutAddMenuEntry("CCW_SLOW", ROTATION_OPTIONS::CCW_SLOW);
+	glutAddMenuEntry("CW_MEDIUM", ROTATION_OPTIONS::CW_MEDIUM);
+	glutAddMenuEntry("CCW_MEDIUM", ROTATION_OPTIONS::CCW_MEDIUM);
+	glutAddMenuEntry("CW_FAST", ROTATION_OPTIONS::CW_FAST);
+	glutAddMenuEntry("CCW_FAST", ROTATION_OPTIONS::CCW_FAST);
+	glutAddMenuEntry("CW_VERY_FAST", ROTATION_OPTIONS::CW_VERY_FAST);
+	glutAddMenuEntry("CCW_VERY_FAST", ROTATION_OPTIONS::CCW_VERY_FAST);
+	glutAddMenuEntry("SPECIAL", ROTATION_OPTIONS::SPECIAL);
+
 	glutCreateMenu(&glut_menu_func);
 	glutAddMenuEntry("Enable/disable autoplay", MENU_OPTION::AUTOPLAY);
 	glutAddMenuEntry("Show/hide debug lines", MENU_OPTION::DEBUG_STRINGS);
 	glutAddMenuEntry("Open/close debug console", MENU_OPTION::CONSOLE);
 	glutAddMenuEntry("Enable/disable zoom out", MENU_OPTION::ZOOM);
+	glutAddSubMenu("Set rotation speed", rotation_speed_menu);
 	glutAttachMenu(GLUT_MIDDLE_BUTTON);
 }
 

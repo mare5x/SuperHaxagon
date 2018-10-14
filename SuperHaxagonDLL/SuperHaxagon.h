@@ -8,7 +8,22 @@ namespace SuperHaxagon {
 		struct Wall {
 			DWORD slot;
 			DWORD distance;
-			DWORD other[3];
+			DWORD width;
+			DWORD other[2];
+
+			void print() const { printf("%d %d %d %d %d\n", slot, distance, width, other[0], other[1]); }
+		};
+
+		enum WORLD_ROTATION_OPTIONS : DWORD {
+			CW_SLOW = 0,
+			CCW_SLOW = 1,
+			CW_MEDIUM = 2,
+			CCW_MEDIUM = 3,
+			CW_FAST = 4,
+			CCW_FAST = 5,
+			CW_VERY_FAST = 6,
+			CCW_VERY_FAST = 7,
+			SPECIAL = 8
 		};
 
 		SuperStruct() : base_adr(get_base_address()) { }
@@ -23,6 +38,11 @@ namespace SuperHaxagon {
 		int get_world_rotation() const { return read_offset<int>(WORLD_ROTATION); }
 		int get_polygon_radius() const { return read_offset<int>(POLYGON_RADIUS); }
 		int get_polygon_sides() const { return read_offset<int>(POLYGON_SIDES); }
+
+		void set_world_rotation_type(WORLD_ROTATION_OPTIONS type)
+		{
+			write_offset<DWORD>(WORLD_ROTATION_TYPE, type);
+		}
 
 		void set_player_slot(int slot) const
 		{
@@ -68,7 +88,9 @@ namespace SuperHaxagon {
 			N_WALLS = 0x2930,
 
 			PLAYER_ROTATION_1 = 0x2954,
-			PLAYER_ROTATION_2 = 0x2958
+			PLAYER_ROTATION_2 = 0x2958,
+
+			WORLD_ROTATION_TYPE = 0x2968
 		};
 
 		/* Returns the base address of the structure that holds most of the interesting properties of the game. */
