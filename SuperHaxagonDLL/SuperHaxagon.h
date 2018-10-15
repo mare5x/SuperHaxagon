@@ -39,9 +39,12 @@ namespace SuperHaxagon {
 		int get_polygon_radius() const { return read_offset<int>(POLYGON_RADIUS); }
 		int get_polygon_sides() const { return read_offset<int>(POLYGON_SIDES); }
 
-		void set_world_rotation_type(WORLD_ROTATION_OPTIONS type)
+		void set_world_rotation_type(WORLD_ROTATION_OPTIONS type) { write_offset<DWORD>(WORLD_ROTATION_TYPE, type); }
+		WORLD_ROTATION_OPTIONS get_world_rotation_type() const { return static_cast<WORLD_ROTATION_OPTIONS>(read_offset<DWORD>(WORLD_ROTATION_TYPE)); }
+
+		bool is_world_moving_clockwise() const
 		{
-			write_offset<DWORD>(WORLD_ROTATION_TYPE, type);
+			return get_world_rotation_type() % 2 == 0;
 		}
 
 		void set_player_slot(int slot) const
@@ -59,6 +62,16 @@ namespace SuperHaxagon {
 		int get_player_rotation() const { return read_offset<int>(PLAYER_ROTATION_1); }
 
 		int get_n_walls() const { return read_offset<int>(N_WALLS); }
+
+		bool is_player_centered() const
+		{
+			int angle = get_player_rotation();
+			int n = get_polygon_sides();
+			for (int k = 0; k < n; ++k)
+				if (abs(angle - ((360 * k + 180) / n)) < 4)
+					return true;
+			return false;
+		}
 
 		int slot_to_world_angle(int slot) const
 		{

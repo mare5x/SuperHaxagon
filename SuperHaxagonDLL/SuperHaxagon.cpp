@@ -38,6 +38,8 @@ enum MENU_OPTION : int {
 	DEBUG_STRINGS, AUTOPLAY, CONSOLE, ZOOM
 };
 
+typedef SuperHaxagon::SuperStruct::WORLD_ROTATION_OPTIONS ROTATION_OPTIONS;
+
 const double PI = acos(-1);
 
 const char* WINDOW_TITLE = "H4X0R";
@@ -68,6 +70,7 @@ DWORD render_return_adr;	// where to return in the original function
 DWORD render_call_adr;		// the new CALL address 
 std::array<BYTE, 5> orig_render_bytes;
 
+int moving_direction = 0;   // -1 (counter clockwise), 0 (not moving), 1 (clockwise)
 
 // Function declarations in this file.
 void open_console();
@@ -85,6 +88,11 @@ void unhook_glut();
 
 void draw_text(const char* text, int x, int y);
 void draw_debug_strings();
+
+void autoplay_instant(SuperHaxagon::SuperStruct::Wall* walls, int slots);
+void autoplay_emulated(SuperHaxagon::SuperStruct::Wall* walls, int slots);
+void start_moving(int direction);
+void stop_moving();
 
 
 void open_console()
@@ -144,7 +152,7 @@ void __stdcall hooked_render()
 	}
 
 	if (setting_rotation_type != -1)
-		super.set_world_rotation_type(static_cast<SuperHaxagon::SuperStruct::WORLD_ROTATION_OPTIONS>(setting_rotation_type));
+		super.set_world_rotation_type(static_cast<ROTATION_OPTIONS>(setting_rotation_type));
 }
 
 
@@ -217,40 +225,37 @@ void SuperHaxagon::draw()
 	// Find the closest walls for each slot. Then move to the slot, whose closest wall is the farthest away.
 	// A slot can have multiple walls.
 	DWORD slots = super.get_polygon_sides();
-	DWORD min_dist[6] = {};
-	for (int i = 0; i < slots; ++i) min_dist[i] = 0xffff;
+	SuperStruct::Wall closest_walls[6] = {};
+	for (int i = 0; i < slots; ++i) closest_walls[i].distance = 0xffff;
 
 	// Draw lines to the closest walls.
 	glBegin(GL_LINES);
 	for (int i = 0; i < 64; ++i) {
-		DWORD& wall_slot = super.walls[i].slot;
-		DWORD& wall_dist = super.walls[i].distance;
+		SuperStruct::Wall& wall = super.walls[i];
 
-		if (wall_slot < 0 || wall_slot > slots) continue;
-		if (wall_dist < min_dist[wall_slot] && wall_dist > 0)
-			min_dist[wall_slot] = wall_dist;
+		if (wall.slot < 0 || wall.slot > slots || wall.distance < 0 || wall.width <= 0 || wall.other[1] == 0) continue;
 
-		if (wall_dist > 1000 || wall_dist <= 0) continue;
+		// Ignore walls that can't hurt us anymore to think ahead.
+		if (wall.distance < closest_walls[wall.slot].distance && (wall.distance + wall.width > 200))
+			closest_walls[wall.slot] = wall;
 
-		int deg = super.slot_to_world_angle(wall_slot);
+		if (wall.distance > 1000) continue;
+
+		int deg = super.slot_to_world_angle(wall.slot);
 		double rad = -deg * PI / 180;
 
 		glVertex2d(0, 0);
-		glVertex2d(cos(rad) * wall_dist, sin(rad) * wall_dist);
+		glVertex2d(cos(rad) * wall.distance, sin(rad) * wall.distance);
 	}
 	glEnd();
 
 	glPopMatrix();
 
-	DWORD max_dist = 0;
-	DWORD best_slot = 0;
-	for (int i = 0; i < slots; ++i) {
-		if (min_dist[i] > max_dist) {
-			max_dist = min_dist[i];
-			best_slot = i;
-		}
-	}
-	super.set_player_slot(best_slot);
+	//SuperHaxagon::SuperStruct::Wall wll = super.walls[0];
+	//printf("%d %d %d %d %d\n", wll.slot, wll.distance, wll.width, wll.other[0], wll.other[1]);
+
+	//autoplay_instant(closest_walls, slots);
+	autoplay_emulated(closest_walls, slots);
 }
 
 
@@ -348,7 +353,6 @@ void hook_glut(const char* title)
 
 	// Middle mouse click menu:
 	// Activating the menu also works as an in-game pause!
-	typedef SuperHaxagon::SuperStruct::WORLD_ROTATION_OPTIONS ROTATION_OPTIONS;
 	int rotation_speed_menu = glutCreateMenu(&glut_rotation_speed_menu_func);
 	glutAddMenuEntry("DEFAULT", -1);
 	glutAddMenuEntry("CW_SLOW", ROTATION_OPTIONS::CW_SLOW);
@@ -410,4 +414,104 @@ void draw_debug_strings()
 
 	snprintf(text, 16, "%d", super.get_player_rotation());
 	draw_text(text, 5, 28 * 5);
+}
+
+void autoplay_instant(SuperHaxagon::SuperStruct::Wall* walls, int slots)
+{
+	DWORD max_dist = 0;
+	DWORD best_slot = 0;
+	for (int i = 0; i < slots; ++i) {
+		if (walls[i].distance > max_dist) {
+			max_dist = walls[i].distance;
+			best_slot = i;
+		}
+	}
+	super.set_player_slot(best_slot);
+}
+
+void autoplay_emulated(SuperHaxagon::SuperStruct::Wall* walls, int slots)
+{
+	// Make a DAG
+
+	// Each node is a slot.
+	// The target node has no outgoing edges only 2 incoming edges.
+	// The source node has only 2 outgoing edges and no incoming edges.
+
+	// For now all edges have the same weight.
+
+	// An edge from node u to node v exists if the wall distance at that slot
+	// is less than a certain threshold value.
+
+	// Try going counterclockwise or clockwise depending on which path is shorter
+	// and has no obstacles in the way.
+
+	DWORD cur_slot = super.get_player_slot();
+	int max_dist = -999999;
+	DWORD best_slot = 0;
+	printf("-----------\n");
+	for (int i = 0; i < slots; ++i) {
+		walls[i].print();
+		//int dist = (int)walls[i].distance - (int)walls[i].width;
+		int dist = walls[i].distance;
+		if (dist > max_dist) {
+			max_dist = dist; 
+			best_slot = i;
+		}
+	}
+
+	// counter clockwise and clockwise steps
+	int ccw_cost = (best_slot <= cur_slot) ? slots - 1 - cur_slot + (best_slot + 1) : best_slot - cur_slot;
+	int cw_cost = (best_slot <= cur_slot) ? cur_slot - best_slot : cur_slot + 1 + slots - 1 - best_slot;
+
+	for (int c = cur_slot; c != best_slot; c = (c + 1) % slots) {
+		if (walls[c].distance + walls[c].width < 300 || walls[c].distance == 0 && walls[c].width > 800) ccw_cost = 99;
+	}
+	for (int c = cur_slot; c != best_slot; c = (c + slots - 1) % slots) {
+		if (walls[c].distance + walls[c].width < 300 || walls[c].distance == 0 && walls[c].width > 800) cw_cost = 99;
+	}
+	
+	// Add a penalty based on the rotation of the world, since the rotation impacts player speed.
+	if (super.is_world_moving_clockwise())
+		ccw_cost *= 1.3;
+	else
+		cw_cost *= 1.3;
+
+	printf("dist %d, width %d, ccw %d, cw %d, c %d, b %d\n", max_dist, walls[best_slot].width, ccw_cost, cw_cost, cur_slot, best_slot);
+
+	if (ccw_cost == 0 || cw_cost == 0) {
+		if (super.is_player_centered())
+			stop_moving();
+		return;
+	}
+
+	if (ccw_cost <= cw_cost) {
+		start_moving(-1);
+	}
+	else {
+		start_moving(1);
+	}
+}
+
+void start_moving(int direction)
+{
+	stop_moving();
+
+	if (direction > 0)
+		SendMessage(g_hwnd, WM_KEYDOWN, VK_RIGHT, 0);
+	else
+		SendMessage(g_hwnd, WM_KEYDOWN, VK_LEFT, 0);
+	
+	moving_direction = direction;
+}
+
+void stop_moving()
+{
+	if (moving_direction == 0) return;
+
+	if (moving_direction > 0)
+		SendMessage(g_hwnd, WM_KEYUP, VK_RIGHT, 0);
+	else
+		SendMessage(g_hwnd, WM_KEYUP, VK_LEFT, 0);
+	
+	moving_direction = 0;
 }
