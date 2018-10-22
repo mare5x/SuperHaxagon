@@ -1,6 +1,8 @@
 #include "stdafx.h"
-#include "SuperHaxagon.h"
 #include "glut_hook.h"
+#include "SuperHaxagon.h"
+#include "super_ai.h"
+#include "memory_tools.h"
 
 
 namespace fmodex {
@@ -35,14 +37,14 @@ namespace fmodex {
 
 
 enum MENU_OPTION : int {
-	DEBUG_STRINGS, AUTOPLAY, CONSOLE, ZOOM
+	DEBUG_STRINGS, AUTOPLAY, AUTOPLAY_NATURAL, AUTOPLAY_INSTANT, CONSOLE, ZOOM
 };
 
-typedef SuperHaxagon::SuperStruct::WORLD_ROTATION_OPTIONS ROTATION_OPTIONS;
+typedef SuperStruct::WORLD_ROTATION_OPTIONS ROTATION_OPTIONS;
 
 const double PI = acos(-1);
 
-const char* WINDOW_TITLE = "H4X0R";
+const char* WINDOW_TITLE = "Super Haxagon";
 int VIEWPORT_WIDTH = 768;
 int VIEWPORT_HEIGHT = 480;
 
@@ -51,7 +53,8 @@ RECT window_rect = { 0, 0, 768, 480};
 
 int mouse_x, mouse_y;
 
-bool setting_auto_play = true;
+bool setting_autoplay = true;
+int setting_autoplay_type = MENU_OPTION::AUTOPLAY_NATURAL;
 bool setting_debug_strings = true;
 bool setting_console = true;
 bool setting_zoom = false;
@@ -63,14 +66,14 @@ DWORD g_proc_adr;  // superhexagon.exe address
 
 WNDPROC orig_wnd_proc;
 
-SuperHaxagon::SuperStruct super;
+SuperStruct super;
 
 DWORD render_adr;			// the address of the hook in the original function
 DWORD render_return_adr;	// where to return in the original function
 DWORD render_call_adr;		// the new CALL address 
 std::array<BYTE, 5> orig_render_bytes;
 
-int moving_direction = 0;   // -1 (counter clockwise), 0 (not moving), 1 (clockwise)
+int moving_direction = 0;   // 1 (counter clockwise), 0 (not moving), -1 (clockwise)
 
 // Function declarations in this file.
 void open_console();
@@ -89,8 +92,6 @@ void unhook_glut();
 void draw_text(const char* text, int x, int y);
 void draw_debug_strings();
 
-void autoplay_instant(SuperHaxagon::SuperStruct::Wall* walls, int slots);
-void autoplay_emulated(SuperHaxagon::SuperStruct::Wall* walls, int slots);
 void start_moving(int direction);
 void stop_moving();
 
@@ -121,7 +122,7 @@ LRESULT CALLBACK input_handler(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lPara
 	}
 	else if (uMsg == WM_KEYDOWN && (wParam == 0x51 || wParam == 0x45)) {
 		// Use the Q and E keys to move the player cursor to the next or previous slot.
-		super.set_player_slot((super.get_player_slot() + (wParam == 0x51 ? 1 : -1)) % super.get_polygon_sides());
+		super.set_player_slot((super.get_player_slot() + (wParam == 0x51 ? 1 : -1)) % super.get_slots());
 	}
 
 	// Allow window resizing:
@@ -216,28 +217,16 @@ void SuperHaxagon::draw()
 		draw_debug_strings();
 	}
 
-	if (!setting_auto_play) return;
+	if (!setting_autoplay) return;
 
 	glPushMatrix();
 	// Make the camera origin be the center of the screen.
 	glTranslated(VIEWPORT_WIDTH / 2, VIEWPORT_HEIGHT / 2, 0);
 
-	// Find the closest walls for each slot. Then move to the slot, whose closest wall is the farthest away.
-	// A slot can have multiple walls.
-	DWORD slots = super.get_polygon_sides();
-	SuperStruct::Wall closest_walls[6] = {};
-	for (int i = 0; i < slots; ++i) closest_walls[i].distance = 0xffff;
-
 	// Draw lines to the closest walls.
 	glBegin(GL_LINES);
-	for (int i = 0; i < 64; ++i) {
+	for (int i = 0; i < super.walls.size(); ++i) {
 		SuperStruct::Wall& wall = super.walls[i];
-
-		if (wall.slot < 0 || wall.slot > slots || wall.distance < 0 || wall.width <= 0 || wall.other[1] == 0) continue;
-
-		// Ignore walls that can't hurt us anymore to think ahead.
-		if (wall.distance < closest_walls[wall.slot].distance && (wall.distance + wall.width > 200))
-			closest_walls[wall.slot] = wall;
 
 		if (wall.distance > 1000) continue;
 
@@ -251,11 +240,15 @@ void SuperHaxagon::draw()
 
 	glPopMatrix();
 
-	//SuperHaxagon::SuperStruct::Wall wll = super.walls[0];
-	//printf("%d %d %d %d %d\n", wll.slot, wll.distance, wll.width, wll.other[0], wll.other[1]);
-
-	//autoplay_instant(closest_walls, slots);
-	autoplay_emulated(closest_walls, slots);
+	switch (setting_autoplay_type) {
+	case AUTOPLAY_NATURAL:
+		start_moving(get_move_dir(&super));
+		break;
+	case AUTOPLAY_INSTANT:
+		stop_moving();
+		autoplay_instant(&super);
+		break;
+	}
 }
 
 
@@ -292,6 +285,8 @@ void SuperHaxagon::hook(HMODULE dll)
 
 void WINAPI SuperHaxagon::unhook()
 {
+	stop_moving();
+	
 	unhook_glut();
 
 	write_code_buffer(render_adr, orig_render_bytes.data(), 5);
@@ -313,9 +308,6 @@ void glut_mouse_move_event(int x, int y)
 void glut_menu_func(int value)
 {
 	switch (value) {
-	case MENU_OPTION::AUTOPLAY:
-		setting_auto_play = !setting_auto_play;
-		break;
 	case MENU_OPTION::DEBUG_STRINGS:
 		setting_debug_strings = !setting_debug_strings;
 		break;
@@ -339,6 +331,25 @@ void glut_rotation_speed_menu_func(int option)
 }
 
 
+void glut_autoplay_menu_func(int option)
+{
+	switch (option) {
+	case MENU_OPTION::AUTOPLAY:
+		setting_autoplay = !setting_autoplay;
+		break;
+	case MENU_OPTION::AUTOPLAY_NATURAL:
+		setting_autoplay_type = AUTOPLAY_NATURAL;
+		setting_autoplay = true;
+		break;
+	case MENU_OPTION::AUTOPLAY_INSTANT:
+		setting_autoplay_type = AUTOPLAY_INSTANT;
+		setting_autoplay = true;
+	default:
+		break;
+	}
+}
+
+
 void hook_glut(const char* title)
 {
 	glut_hook::hook_SwapBuffers(&SuperHaxagon::draw);
@@ -353,6 +364,7 @@ void hook_glut(const char* title)
 
 	// Middle mouse click menu:
 	// Activating the menu also works as an in-game pause!
+
 	int rotation_speed_menu = glutCreateMenu(&glut_rotation_speed_menu_func);
 	glutAddMenuEntry("DEFAULT", -1);
 	glutAddMenuEntry("CW_SLOW", ROTATION_OPTIONS::CW_SLOW);
@@ -365,8 +377,13 @@ void hook_glut(const char* title)
 	glutAddMenuEntry("CCW_VERY_FAST", ROTATION_OPTIONS::CCW_VERY_FAST);
 	glutAddMenuEntry("SPECIAL", ROTATION_OPTIONS::SPECIAL);
 
-	glutCreateMenu(&glut_menu_func);
+	int autoplay_menu = glutCreateMenu(&glut_autoplay_menu_func);
 	glutAddMenuEntry("Enable/disable autoplay", MENU_OPTION::AUTOPLAY);
+	glutAddMenuEntry("Natural movements", MENU_OPTION::AUTOPLAY_NATURAL);
+	glutAddMenuEntry("Instant movements", MENU_OPTION::AUTOPLAY_INSTANT);
+
+	glutCreateMenu(&glut_menu_func);
+	glutAddSubMenu("Autoplay settings", autoplay_menu);
 	glutAddMenuEntry("Show/hide debug lines", MENU_OPTION::DEBUG_STRINGS);
 	glutAddMenuEntry("Open/close debug console", MENU_OPTION::CONSOLE);
 	glutAddMenuEntry("Enable/disable zoom out", MENU_OPTION::ZOOM);
@@ -409,97 +426,20 @@ void draw_debug_strings()
 	snprintf(text, 16, "%d", super.get_polygon_radius());
 	draw_text(text, 5, 28 * 3);
 
-	snprintf(text, 16, "%d", super.get_polygon_sides());
+	snprintf(text, 16, "%d", super.get_slots());
 	draw_text(text, 5, 28 * 4);
 
 	snprintf(text, 16, "%d", super.get_player_rotation());
 	draw_text(text, 5, 28 * 5);
 }
 
-void autoplay_instant(SuperHaxagon::SuperStruct::Wall* walls, int slots)
-{
-	DWORD max_dist = 0;
-	DWORD best_slot = 0;
-	for (int i = 0; i < slots; ++i) {
-		if (walls[i].distance > max_dist) {
-			max_dist = walls[i].distance;
-			best_slot = i;
-		}
-	}
-	super.set_player_slot(best_slot);
-}
-
-void autoplay_emulated(SuperHaxagon::SuperStruct::Wall* walls, int slots)
-{
-	// Make a DAG
-
-	// Each node is a slot.
-	// The target node has no outgoing edges only 2 incoming edges.
-	// The source node has only 2 outgoing edges and no incoming edges.
-
-	// For now all edges have the same weight.
-
-	// An edge from node u to node v exists if the wall distance at that slot
-	// is less than a certain threshold value.
-
-	// Try going counterclockwise or clockwise depending on which path is shorter
-	// and has no obstacles in the way.
-
-	DWORD cur_slot = super.get_player_slot();
-	int max_dist = -999999;
-	DWORD best_slot = 0;
-	printf("-----------\n");
-	for (int i = 0; i < slots; ++i) {
-		walls[i].print();
-		//int dist = (int)walls[i].distance - (int)walls[i].width;
-		int dist = walls[i].distance;
-		if (dist > max_dist) {
-			max_dist = dist; 
-			best_slot = i;
-		}
-	}
-
-	// counter clockwise and clockwise steps
-	int ccw_cost = (best_slot <= cur_slot) ? slots - 1 - cur_slot + (best_slot + 1) : best_slot - cur_slot;
-	int cw_cost = (best_slot <= cur_slot) ? cur_slot - best_slot : cur_slot + 1 + slots - 1 - best_slot;
-
-	for (int c = cur_slot; c != best_slot; c = (c + 1) % slots) {
-		if (walls[c].distance + walls[c].width < 300 || walls[c].distance == 0 && walls[c].width > 800) ccw_cost = 99;
-	}
-	for (int c = cur_slot; c != best_slot; c = (c + slots - 1) % slots) {
-		if (walls[c].distance + walls[c].width < 300 || walls[c].distance == 0 && walls[c].width > 800) cw_cost = 99;
-	}
-	
-	// Add a penalty based on the rotation of the world, since the rotation impacts player speed.
-	if (super.is_world_moving_clockwise())
-		ccw_cost *= 1.3;
-	else
-		cw_cost *= 1.3;
-
-	printf("dist %d, width %d, ccw %d, cw %d, c %d, b %d\n", max_dist, walls[best_slot].width, ccw_cost, cw_cost, cur_slot, best_slot);
-
-	if (ccw_cost == 0 || cw_cost == 0) {
-		if (super.is_player_centered())
-			stop_moving();
-		return;
-	}
-
-	if (ccw_cost <= cw_cost) {
-		start_moving(-1);
-	}
-	else {
-		start_moving(1);
-	}
-}
-
 void start_moving(int direction)
 {
-	stop_moving();
-
-	if (direction > 0)
-		SendMessage(g_hwnd, WM_KEYDOWN, VK_RIGHT, 0);
-	else
-		SendMessage(g_hwnd, WM_KEYDOWN, VK_LEFT, 0);
+	if (direction != moving_direction)
+		stop_moving();
+	
+	if (direction != 0)
+		SendMessage(g_hwnd, WM_KEYDOWN, direction > 0 ? VK_LEFT : VK_RIGHT, 0);
 	
 	moving_direction = direction;
 }
@@ -508,10 +448,7 @@ void stop_moving()
 {
 	if (moving_direction == 0) return;
 
-	if (moving_direction > 0)
-		SendMessage(g_hwnd, WM_KEYUP, VK_RIGHT, 0);
-	else
-		SendMessage(g_hwnd, WM_KEYUP, VK_LEFT, 0);
+	SendMessage(g_hwnd, WM_KEYUP, moving_direction > 0 ? VK_LEFT : VK_RIGHT, 0);
 	
 	moving_direction = 0;
 }
