@@ -7,4 +7,5 @@ namespace SuperHaxagon {
 	void WINAPI unhook();
 
 	void draw();
+	void update();
 }

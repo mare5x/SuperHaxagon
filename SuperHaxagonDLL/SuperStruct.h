@@ -41,7 +41,6 @@ struct SuperStruct {
 	int get_world_rotation() const { return read_offset<int>(WORLD_ROTATION); }
 	int get_polygon_radius() const { return read_offset<int>(POLYGON_RADIUS); }
 	int get_slots() const { return read_offset<int>(POLYGON_SIDES); }
-	
 
 	void set_world_rotation_type(WORLD_ROTATION_OPTIONS type) { write_offset<DWORD>(WORLD_ROTATION_TYPE, type); }
 	WORLD_ROTATION_OPTIONS get_world_rotation_type() const { return static_cast<WORLD_ROTATION_OPTIONS>(read_offset<DWORD>(WORLD_ROTATION_TYPE)); }
@@ -72,6 +71,10 @@ struct SuperStruct {
 
 	int get_n_walls() const { return read_offset<int>(N_WALLS); }
 
+	int get_wall_speed() const { return read_offset<int>(WALL_SPEED); }
+	void set_wall_speed(DWORD val) { write_offset<DWORD>(WALL_SPEED, val); }
+	float get_wall_speed_percent() const { return get_wall_speed() / 40.0f; }  // 40 is the max speed
+
 	bool is_player_centered() const;
 
 	int slot_to_world_angle(int slot) const;
@@ -90,6 +93,7 @@ private:
 
 		WALL_START = 0x220,  // The start of an array containing Walls.
 		N_WALLS = 0x2930,
+		WALL_SPEED = 0x2948,
 
 		PLAYER_ROTATION_1 = 0x2954,
 		PLAYER_ROTATION_2 = 0x2958,

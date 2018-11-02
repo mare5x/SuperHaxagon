@@ -3,6 +3,7 @@
 #include "SuperHaxagon.h"
 #include "super_ai.h"
 #include "memory_tools.h"
+#include "win_console.h"
 
 
 namespace fmodex {
@@ -37,7 +38,7 @@ namespace fmodex {
 
 
 enum MENU_OPTION : int {
-	DEBUG_STRINGS, AUTOPLAY, AUTOPLAY_NATURAL, AUTOPLAY_INSTANT, CONSOLE, ZOOM
+	DEBUG_LINES, AUTOPLAY, AUTOPLAY_NATURAL, AUTOPLAY_INSTANT, CONSOLE, ZOOM
 };
 
 typedef SuperStruct::WORLD_ROTATION_OPTIONS ROTATION_OPTIONS;
@@ -52,13 +53,15 @@ int VIEWPORT_HEIGHT = 480;
 RECT window_rect = { 0, 0, 768, 480};
 
 int mouse_x, mouse_y;
+bool console_change_requested = false;
 
 bool setting_autoplay = true;
 int setting_autoplay_type = MENU_OPTION::AUTOPLAY_NATURAL;
-bool setting_debug_strings = true;
+bool setting_debug_lines = true;
 bool setting_console = true;
 bool setting_zoom = false;
 int setting_rotation_type = -1;
+int setting_wall_speed = -1;
 
 HMODULE g_dll;
 HWND g_hwnd;
@@ -76,8 +79,6 @@ std::array<BYTE, 5> orig_render_bytes;
 int moving_direction = 0;   // 1 (counter clockwise), 0 (not moving), -1 (clockwise)
 
 // Function declarations in this file.
-void open_console();
-void close_console();
 LRESULT CALLBACK input_handler(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam);
 
 void __stdcall hooked_render();
@@ -94,20 +95,6 @@ void draw_debug_strings();
 
 void start_moving(int direction);
 void stop_moving();
-
-
-void open_console()
-{
-	AllocConsole();
-	freopen_s((FILE**)stdout, "CONOUT$", "w", stdout);
-}
-
-
-void close_console()
-{
-	fclose(stdout);
-	FreeConsole();
-}
 
 
 LRESULT CALLBACK input_handler(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
@@ -175,49 +162,16 @@ void __declspec(naked) render_trampoline()
 }
 
 
-void SuperHaxagon::draw()
-{	
-	static bool was_fullscreen = false;
-	if (was_fullscreen != super.is_fullscreen()) {
-		was_fullscreen = !was_fullscreen;
-		if (was_fullscreen) {
-			VIEWPORT_WIDTH = glutGet(GLUT_SCREEN_WIDTH);
-			VIEWPORT_HEIGHT = glutGet(GLUT_SCREEN_HEIGHT);
-		}
-		else {
-			VIEWPORT_WIDTH = 768;
-			VIEWPORT_HEIGHT = 480;
-		}
-	}
+void draw_debug()
+{
+	glBegin(GL_POINTS);
 
-	if (fmodex::is_hooked()) {
-		// Draw a pulsing sphere based on the audio data.
-		static float arr[1024];
-		fmodex::FMOD_System_GetWaveData(fmodex::_system, arr, 1024, 0);
-		float avg = 0;
-		for (int i = 0; i < 1024; ++i)
-			avg += abs(arr[i]) / 1024;
-			
-		glPushMatrix();
-		glTranslated(VIEWPORT_WIDTH / 2, VIEWPORT_HEIGHT / 2, 0);
-		glutWireSphere(256 * avg, 16, 16);
-		glPopMatrix();
-	}
+	glColor3f(1.0f, 0, 0);
+	glVertex2d(mouse_x, mouse_y);
 
-	super.update();
+	glEnd();
 
-	if (setting_debug_strings) {
-		glBegin(GL_POINTS);
-
-		glColor3f(1.0f, 0, 0);
-		glVertex2d(mouse_x, mouse_y);
-
-		glEnd();
-
-		draw_debug_strings();
-	}
-
-	if (!setting_autoplay) return;
+	draw_debug_strings();
 
 	glPushMatrix();
 	// Make the camera origin be the center of the screen.
@@ -239,6 +193,54 @@ void SuperHaxagon::draw()
 	glEnd();
 
 	glPopMatrix();
+}
+
+
+void SuperHaxagon::draw()
+{	
+	update();
+
+	if (fmodex::is_hooked() && setting_debug_lines) {
+		// Draw a pulsing sphere based on the audio data.
+		static float arr[1024];
+		fmodex::FMOD_System_GetWaveData(fmodex::_system, arr, 1024, 0);
+		float avg = 0;
+		for (int i = 0; i < 1024; ++i)
+			avg += abs(arr[i]) / 1024;
+			
+		glPushMatrix();
+		glTranslated(VIEWPORT_WIDTH / 2, VIEWPORT_HEIGHT / 2, 0);
+		glutWireSphere(256 * avg, 16, 16);
+		glPopMatrix();
+	}
+
+	if (setting_debug_lines) {
+		draw_debug();
+	}
+}
+
+
+void SuperHaxagon::update()
+{
+	static bool was_fullscreen = false;
+	if (was_fullscreen != super.is_fullscreen()) {
+		was_fullscreen = !was_fullscreen;
+		if (was_fullscreen) {
+			VIEWPORT_WIDTH = glutGet(GLUT_SCREEN_WIDTH);
+			VIEWPORT_HEIGHT = glutGet(GLUT_SCREEN_HEIGHT);
+		}
+		else {
+			VIEWPORT_WIDTH = 768;
+			VIEWPORT_HEIGHT = 480;
+		}
+	}
+
+	super.update();
+
+	if (setting_wall_speed != -1)
+		super.set_wall_speed(setting_wall_speed);
+
+	if (!setting_autoplay) return;
 
 	switch (setting_autoplay_type) {
 	case AUTOPLAY_NATURAL:
@@ -248,6 +250,15 @@ void SuperHaxagon::draw()
 		stop_moving();
 		autoplay_instant(&super);
 		break;
+	}
+
+	if (console_change_requested) {
+		setting_console = !setting_console;
+		if (setting_console)
+			open_console();
+		else
+			close_console();
+		console_change_requested = false;
 	}
 }
 
@@ -290,9 +301,8 @@ void WINAPI SuperHaxagon::unhook()
 	unhook_glut();
 
 	write_code_buffer(render_adr, orig_render_bytes.data(), 5);
-
-	fclose(stdout);
-	FreeConsole();
+	
+	close_console();
 
 	FreeLibraryAndExitThread(g_dll, 0);
 }
@@ -308,13 +318,11 @@ void glut_mouse_move_event(int x, int y)
 void glut_menu_func(int value)
 {
 	switch (value) {
-	case MENU_OPTION::DEBUG_STRINGS:
-		setting_debug_strings = !setting_debug_strings;
+	case MENU_OPTION::DEBUG_LINES:
+		setting_debug_lines = !setting_debug_lines;
 		break;
 	case MENU_OPTION::CONSOLE:
-		setting_console = !setting_console;
-		if (setting_console) open_console();
-		else close_console();
+		console_change_requested = true;
 		break;
 	case MENU_OPTION::ZOOM:
 		setting_zoom = !setting_zoom;
@@ -328,6 +336,12 @@ void glut_menu_func(int value)
 void glut_rotation_speed_menu_func(int option)
 {
 	setting_rotation_type = option;
+}
+
+
+void glut_wall_speed_menu_func(int speed)
+{
+	setting_wall_speed = speed;
 }
 
 
@@ -377,6 +391,14 @@ void hook_glut(const char* title)
 	glutAddMenuEntry("CCW_VERY_FAST", ROTATION_OPTIONS::CCW_VERY_FAST);
 	glutAddMenuEntry("SPECIAL", ROTATION_OPTIONS::SPECIAL);
 
+	int wall_speed_menu = glutCreateMenu(&glut_wall_speed_menu_func);
+	glutAddMenuEntry("DEFAULT", -1);
+	glutAddMenuEntry("VERY SLOW", 8);
+	glutAddMenuEntry("SLOW", 22);
+	glutAddMenuEntry("MEDIUM", 33);
+	glutAddMenuEntry("FAST", 40);
+	glutAddMenuEntry("VERY FAST", 50);
+
 	int autoplay_menu = glutCreateMenu(&glut_autoplay_menu_func);
 	glutAddMenuEntry("Enable/disable autoplay", MENU_OPTION::AUTOPLAY);
 	glutAddMenuEntry("Natural movements", MENU_OPTION::AUTOPLAY_NATURAL);
@@ -384,10 +406,11 @@ void hook_glut(const char* title)
 
 	glutCreateMenu(&glut_menu_func);
 	glutAddSubMenu("Autoplay settings", autoplay_menu);
-	glutAddMenuEntry("Show/hide debug lines", MENU_OPTION::DEBUG_STRINGS);
+	glutAddMenuEntry("Show/hide debug lines", MENU_OPTION::DEBUG_LINES);
 	glutAddMenuEntry("Open/close debug console", MENU_OPTION::CONSOLE);
 	glutAddMenuEntry("Enable/disable zoom out", MENU_OPTION::ZOOM);
 	glutAddSubMenu("Set rotation speed", rotation_speed_menu);
+	glutAddSubMenu("Set wall speed", wall_speed_menu);
 	glutAttachMenu(GLUT_MIDDLE_BUTTON);
 }
 
@@ -416,21 +439,25 @@ void draw_text(const char* text, int x, int y)
 
 void draw_debug_strings()
 {
+	const int x = 5;
+	const int y = 28;
+	int line = 1;
+
 	char text[16] = {};
 	snprintf(text, 16, "%d %d", mouse_x, mouse_y);
-	draw_text(text, 5, 28);
+	draw_text(text, x, y * line++);
 
 	snprintf(text, 16, "%d", super.get_world_rotation());
-	draw_text(text, 5, 28 * 2);
+	draw_text(text, x, y * line++);
 
-	snprintf(text, 16, "%d", super.get_polygon_radius());
-	draw_text(text, 5, 28 * 3);
-
-	snprintf(text, 16, "%d", super.get_slots());
-	draw_text(text, 5, 28 * 4);
+	//snprintf(text, 16, "%d", super.get_slots());
+	//draw_text(text, x, y * line++);
 
 	snprintf(text, 16, "%d", super.get_player_rotation());
-	draw_text(text, 5, 28 * 5);
+	draw_text(text, x, y * line++);
+
+	snprintf(text, 16, "%d", super.get_wall_speed());
+	draw_text(text, x, y * line++);
 }
 
 void start_moving(int direction)
