@@ -11,19 +11,19 @@ to provide custom drawing and to modify the game state to the user's liking.
 
 _SuperHaxagon_ can:
 
- * play the game using either natural or instant movements,
+ * play the game using either natural (_key emulated_) or instant movements,
  * draw using _OpenGL_ functions,
  * call _glut_ and _fmodex_ functions directly,
  * remove window resizing constraints, 
  * control the game _zoom_ level,
- * control the game rotation speed,
+ * control the game rotation and wall speed,
  * ...
 
 ## Usage
 
 Run with    
->  > SuperHaxagon.exe _path\_to\_dll_
+> \> SuperHaxagon.exe _path\_to\_dll_
 
 where _path\_to\_dll_ is the path to _SuperHaxagon.dll_.
 
-Access the bot settings menu in-game by pressing the _middle mouse_ button.
+Access the bot settings menu in-game by pressing the _**middle mouse**_ button.

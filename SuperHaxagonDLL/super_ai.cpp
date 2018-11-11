@@ -4,56 +4,69 @@
 #include <cstdio>
 
 
-int slots;
-int world_direction;  // world spinning rotation direction 
-int near[6];
-int far[6];
+namespace {
+	int slots;
+	int world_direction;  // world spinning rotation direction 
+	int hedge;
+	int near[6];
+	int far[6];
+}
 
 
 /* dir should be 1 for ccw and -1 for cw movement. */
-inline int next_slot(int i, int dir)
+inline int get_next_slot(int i, int dir)
 {
 	return (i + slots + dir) % slots;
 }
 
 
-/** Assigns a score to the movement if the player were to move from slot i 
-	to slot n in the given direction. The higher the score, the better. 
+/** Assigns a score to the movement if the player were to move from slot start_slot 
+	to slot end_slot in the given direction. The higher the score, the better. 
 	
 	Idea thanks to https://github.com/ecx86/superhexagon-internal.*/
-int evaluate_move(int i, int n, int dir)
+int evaluate_move(int start_slot, int end_slot, int dir)
 {
 	// Prioritize movement in the direction the world is spinning in, because
 	// the player moves faster if moving in the same direction as the world.
-	const int step_penalty = world_direction == dir ? 42 : 69; 
+	const int step_penalty = world_direction == dir ? 28 : 36; 
 	
-	int start_dist = far[i];
+	int cur_slot = start_slot;
+	int start_dist = far[cur_slot];
+	int step_counter = 0;
+	// Penalty values were found by trial and error. Mostly magic.
 	int penalty = 0;
 
-	while (i != n) {
-		int next_i = next_slot(i, dir);
+	//if (cur_slot == end_slot && far[cur_slot] - near[cur_slot] < hedge) {
+	//	penalty += pow(near[cur_slot] + hedge - far[cur_slot], 1.5);
+	//}
+
+	while (cur_slot != end_slot) {
+		int next_slot = get_next_slot(cur_slot, dir);
 
 		// An obstruction on the next slot.
-		if (near[next_i] > near[i]) {
-			penalty += (near[next_i] - near[i]) * 4;
-		}
+		//if (near[next_slot] > near[cur_slot]) {
+		//	penalty += (near[next_slot] - near[cur_slot]) * 4;
+		//}
 
 		// The next slot is unreachable due to an obstruction.
-		if (near[next_i] > far[i]) {
-			penalty += (near[next_i] - far[i]) * 8;
+		if (near[next_slot] > far[cur_slot]) {
+			penalty += pow(near[next_slot] - far[cur_slot], 1.5);
 		}
 
 		// The amount of empty space between the current slot and the next slot is too little,
 		// so we most likely can't fit through.
-		if (near[i] > far[next_i] - 420) { // || abs(far[i] - near[next_i]) < 420) {
-			penalty += 4 * (near[i] + 420 - far[next_i]);
+		if (near[cur_slot] > far[next_slot] - hedge) { // || abs(far[cur_slot] - near[next_slot]) < 420) {
+			// The exponent value is very important in controlling whether the 
+			// player should move through this slot or if it's better to maybe 
+			// stay put and wait for the wall to disappear ...
+			penalty += pow(near[cur_slot] + hedge - far[next_slot], 1.42); // *pow(0.85, step_counter++);
 		}
 
 		penalty += step_penalty;
 
-		i = next_i;
+		cur_slot = next_slot;
 	}
-	return far[n] - start_dist - penalty;
+	return far[end_slot] - start_dist - penalty;
 }
 
 
@@ -64,11 +77,13 @@ int get_move_dir(SuperStruct* super)
 
 	slots = super->get_slots();
 	world_direction = super->is_world_moving_clockwise() ? -1 : 1;
+	const int min_dist = 150 - super->get_wall_speed();
+	hedge = super->get_wall_speed_percent() * 420.0f + 42;
 
 	for (int i = 0; i < 6; ++i)
-		near[i] = 142;
+		near[i] = min_dist;
 	for (int i = 0; i < 6; ++i)
-		far[i] = 1 << 13;
+		far[i] = 5432;  // this value mustn't be too large otherwise it can cloud the judgement of moves
 
 	// Fill the near and far arrays.
 	// near[i] is the end distance of the closest wall on slot i (and less than a certain threshold value).
@@ -91,13 +106,17 @@ int get_move_dir(SuperStruct* super)
 	int best_slot = current_slot;
 	int best_dir = 0;
 	int max_score = 0;
-	
+	static int prev_dir = 0;
+
 	for (int target_slot = 0; target_slot < slots; ++target_slot) {
 		for (int dir = -1; dir <= 1; ++dir) {
 			if (dir == 0) continue;
 
 			int score = evaluate_move(current_slot, target_slot, dir);
-			if (score > max_score) {
+			// Add a penalty when changing direction to get rid of sudden direction changing
+			// during inappropriate times.
+			int direction_changed_penalty = (dir == prev_dir ? 0 : 42);
+			if (score > max_score + direction_changed_penalty) {
 				max_score = score;
 				best_dir = target_slot == current_slot ? 0 : dir;
 				best_slot = target_slot;
@@ -125,6 +144,8 @@ int get_move_dir(SuperStruct* super)
 	printf("\n");
 
 	printf("Current %d to new %d in direction %d based on score %d\n", current_slot, best_slot, best_dir, max_score);
+
+	prev_dir = best_dir;
 
 	return best_dir;
 }

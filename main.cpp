@@ -60,15 +60,13 @@ int main(int argc, char** argv, char** env)
 	auto const hProcess = OpenProcess(PROCESS_ALL_ACCESS, FALSE, processId);
 	assert(hProcess);
 
-	if (argc > 1) {
-		// For LoadLibrary to find the dll path, the dll must either be in the working directory
-		// of the process (SuperHexagon.exe's installation folder) or the path must be absolute.
-		HMODULE dll_handle = load_dll(hProcess, argv[1]);
-		if (dll_handle)
-			printf("%x\n", dll_handle);
-		else
-			printf("Error injecting DLL!\n");
-	}
+	// For LoadLibrary to find the dll path, the dll must either be in the working directory
+	// of the process (SuperHexagon.exe's installation folder) or the path must be absolute.
+	HMODULE dll_handle = load_dll(hProcess, argc > 1 ? argv[1] : "SuperHaxagon.dll");
+	if (dll_handle)
+		printf("%x\n", dll_handle);
+	else
+		printf("Error injecting DLL!\n");
 
 	CloseHandle(hProcess);
 
