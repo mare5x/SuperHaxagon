@@ -4,6 +4,7 @@
 #include "super_ai.h"
 #include "memory_tools.h"
 #include "win_console.h"
+#include "super_deep_ai.h"
 
 
 namespace fmodex {
@@ -38,7 +39,7 @@ namespace fmodex {
 
 
 enum MENU_OPTION : int {
-	DEBUG_LINES, AUTOPLAY, AUTOPLAY_NATURAL, AUTOPLAY_INSTANT, CONSOLE, ZOOM
+	DEBUG_LINES, AUTOPLAY, AUTOPLAY_NATURAL, AUTOPLAY_INSTANT, AUTOPLAY_DQN, CONSOLE, ZOOM
 };
 
 typedef SuperStruct::WORLD_ROTATION_OPTIONS ROTATION_OPTIONS;
@@ -56,7 +57,7 @@ int mouse_x, mouse_y;
 bool console_change_requested = false;
 
 bool setting_autoplay = true;
-int setting_autoplay_type = MENU_OPTION::AUTOPLAY_NATURAL;
+int setting_autoplay_type = MENU_OPTION::AUTOPLAY_DQN;
 bool setting_debug_lines = true;
 bool setting_console = true;
 bool setting_zoom = false;
@@ -250,6 +251,9 @@ void SuperHaxagon::update()
 		stop_moving();
 		autoplay_instant(&super);
 		break;
+	case AUTOPLAY_DQN:
+		start_moving(dqn_ai::get_move_dir(&super, true));
+		break;
 	}
 
 	if (console_change_requested) {
@@ -291,11 +295,15 @@ void SuperHaxagon::hook(HMODULE dll)
 	render_return_adr = render_adr + 5;
 
 	fmodex::init(g_proc_adr);
+
+	dqn_ai::init();
 }
 
 
 void WINAPI SuperHaxagon::unhook()
 {
+	dqn_ai::exit();
+
 	stop_moving();
 	
 	unhook_glut();
@@ -358,6 +366,9 @@ void glut_autoplay_menu_func(int option)
 	case MENU_OPTION::AUTOPLAY_INSTANT:
 		setting_autoplay_type = AUTOPLAY_INSTANT;
 		setting_autoplay = true;
+	case MENU_OPTION::AUTOPLAY_DQN:
+		setting_autoplay_type = AUTOPLAY_DQN;
+		setting_autoplay = true;
 	default:
 		break;
 	}
@@ -403,6 +414,7 @@ void hook_glut(const char* title)
 	glutAddMenuEntry("Enable/disable autoplay", MENU_OPTION::AUTOPLAY);
 	glutAddMenuEntry("Natural movements", MENU_OPTION::AUTOPLAY_NATURAL);
 	glutAddMenuEntry("Instant movements", MENU_OPTION::AUTOPLAY_INSTANT);
+	glutAddMenuEntry("Deep Reinforcement Learning", MENU_OPTION::AUTOPLAY_DQN);
 
 	glutCreateMenu(&glut_menu_func);
 	glutAddSubMenu("Autoplay settings", autoplay_menu);
