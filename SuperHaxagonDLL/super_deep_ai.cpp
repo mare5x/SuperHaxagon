@@ -27,16 +27,16 @@ namespace {
 	const double ANN_LEARNING_RATE = 0.2;
 
 	const double AI_GAMMA = 0.9;
-	const double AI_NEUTRAL_REWARD = 1.0;  // all the AI has to do is be neutral, i.e. not die
-	const double AI_LOSS_REWARD = 0.0;  // penalty when it dies
+	const double AI_NEUTRAL_REWARD = 0.15;  // all the AI has to do is be neutral, i.e. not die
+	const double AI_LOSS_REWARD = -0.42;  // penalty when it dies
 
 	const size_t MEM_BATCH_SIZE = 32;
+
+	unsigned long frame_counter = 0;
 
 	genann* ann;
 
 	std::deque<ReplayEntry> replay_memory;
-
-	bool currently_in_game = false;
 }
 
 
@@ -101,21 +101,16 @@ void dqn_ai::report_death()
 	// Try training the agent only when it dies, since 
 	// otherwise it doesn't get any reward.
 	train_ann(replay_memory, AI_LOSS_REWARD);
+
+	frame_counter = 0;
 }
 
 int dqn_ai::get_move_dir(SuperStruct * super, bool learning)
 {
-	if (!super->is_in_game()) {
-		// Careful! This doesn't necessarily mean the agent died!
-		if (currently_in_game) {
-			if (learning)
-				report_death();
-			currently_in_game = false;
-		}
+	if (!super->is_in_game())
 		return 0;
-	}
 
-	currently_in_game = true;
+	++frame_counter;
 
 	GameState game_state;
 	get_game_state(super, &game_state);
@@ -125,7 +120,8 @@ int dqn_ai::get_move_dir(SuperStruct * super, bool learning)
 
 	int action = (action_idx == 0 ? -1 : 1);
 
-	if (learning) {
+	// Try training every second frame.
+	if (learning && frame_counter % 2 == 0) {
 		// epsilon exploration
 		// record memory
 
@@ -148,7 +144,7 @@ int dqn_ai::get_move_dir(SuperStruct * super, bool learning)
 		//	train_ann(replay_memory, AI_NEUTRAL_REWARD);
 		//}
 		
-		_print_mem(mem);
+		//_print_mem(mem);
 	}
 
 	return action;
@@ -164,7 +160,8 @@ int dqn_ai::get_move_dir(SuperStruct * super, bool learning)
 // <results> is an array of two elements: the left and right reward.
 void train_ann(std::deque<ReplayEntry>& memory_batch, double reward)
 {
-	printf("Training AI with %f reward ...\n", reward);
+	static int train_iteration = 0;
+	printf("Training AI [%d] ...\n", ++train_iteration);
 
 	double desired_outputs[MEM_BATCH_SIZE][2];
 	size_t size = min(MEM_BATCH_SIZE, memory_batch.size());
@@ -173,14 +170,19 @@ void train_ann(std::deque<ReplayEntry>& memory_batch, double reward)
 
 	for (int i = 0; i < size; ++i) {
 		const ReplayEntry& mem = memory_batch[i];
-		desired_outputs[i][0] = mem.output[0] * (mem.action[0] ? 1 - pow(AI_GAMMA, MEM_BATCH_SIZE - 1 - i) : 1);
-		desired_outputs[i][1] = mem.output[1] * (mem.action[1] ? 1 - pow(AI_GAMMA, MEM_BATCH_SIZE - 1 - i) : 1);
+		for (int j = 0; j < 2; ++j) {
+			desired_outputs[i][j] = mem.output[j];
+			if (mem.action[j]) {
+				desired_outputs[i][j] += reward * pow(AI_GAMMA, MEM_BATCH_SIZE - 1 - i);
+				desired_outputs[i][j] = max(0.0, desired_outputs[i][j]);
+			}
+		}
 	}
 
-	printf("train_ann:\n");
-	for (int i = 0; i < size; ++i) {
-		_print_arr(desired_outputs[i], 2);
-	}
+	//printf("train_ann:\n");
+	//for (int i = 0; i < size; ++i) {
+	//	_print_arr(desired_outputs[i], 2);
+	//}
 
 	// the most recent results are at the end of the array
 	// pop completed

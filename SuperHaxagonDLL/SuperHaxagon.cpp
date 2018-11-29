@@ -63,6 +63,7 @@ bool setting_console = true;
 bool setting_zoom = false;
 int setting_rotation_type = -1;
 int setting_wall_speed = -1;
+bool setting_auto_restart = true;  // automatically restart the game when dead
 
 HMODULE g_dll;
 HWND g_hwnd;
@@ -240,6 +241,30 @@ void SuperHaxagon::update()
 
 	if (setting_wall_speed != -1)
 		super.set_wall_speed(setting_wall_speed);
+
+	static bool in_game = false;
+	static bool restart_key_pending = false;
+
+	if (restart_key_pending) {
+		SendMessage(g_hwnd, WM_KEYUP, VK_SPACE, 0);
+		restart_key_pending = false;
+	}
+
+	if (!super.is_in_game()) {
+		// Careful! This doesn't necessarily mean the agent died!
+		if (in_game) {
+			if (setting_autoplay_type == AUTOPLAY_DQN)
+				dqn_ai::report_death();
+			in_game = false;
+			
+			if (setting_auto_restart) {
+				SendMessage(g_hwnd, WM_KEYDOWN, VK_SPACE, 0);
+				restart_key_pending = true;
+			}
+		}
+	}
+	else
+		in_game = true;
 
 	if (!setting_autoplay) return;
 
