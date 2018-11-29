@@ -7,6 +7,13 @@ void SuperStruct::Wall::print() const { printf("%d %d %d %d %d\n", slot, distanc
 
 bool SuperStruct::is_fullscreen() const { return read_memory<bool>(base_adr + 0x24); }
 
+char* SuperStruct::get_elapsed_time(char * const dest_string) const
+{
+	int time = get_elapsed_time();
+	sprintf(dest_string, "%d:%2d", time / 60, time % 60);
+	return dest_string;
+}
+
 bool SuperStruct::is_player_centered() const
 {
 	float slot = get_player_rotation() * get_slots() / 360.0f;

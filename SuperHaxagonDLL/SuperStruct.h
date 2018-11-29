@@ -42,6 +42,9 @@ struct SuperStruct {
 	int get_polygon_radius() const { return read_offset<int>(POLYGON_RADIUS); }
 	int get_slots() const { return read_offset<int>(POLYGON_SIDES); }
 
+	int get_elapsed_time() const { return read_offset<int>(ELAPSED_TIME); }
+	char* get_elapsed_time(char* const dest_string) const;
+
 	void set_world_rotation_type(WORLD_ROTATION_OPTIONS type) { write_offset<DWORD>(WORLD_ROTATION_TYPE, type); }
 	WORLD_ROTATION_OPTIONS get_world_rotation_type() const { return static_cast<WORLD_ROTATION_OPTIONS>(read_offset<DWORD>(WORLD_ROTATION_TYPE)); }
 
@@ -99,6 +102,8 @@ private:
 		PLAYER_ROTATION_2 = 0x2958,
 
 		WORLD_ROTATION_TYPE = 0x2968,
+
+		ELAPSED_TIME = 0x2988,
 
 		IN_GAME = 0x40668
 	};
