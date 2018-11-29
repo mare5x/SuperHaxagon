@@ -27,7 +27,7 @@ namespace {
 	const double ANN_LEARNING_RATE = 0.2;
 
 	const double AI_GAMMA = 0.9;
-	const double AI_NEUTRAL_REWARD = 0.15;  // all the AI has to do is be neutral, i.e. not die
+	const double AI_NEUTRAL_REWARD = 0.01;  // all the AI has to do is be neutral, i.e. not die
 	const double AI_LOSS_REWARD = -0.42;  // penalty when it dies
 
 	const size_t MEM_BATCH_SIZE = 32;
@@ -68,6 +68,14 @@ void _print_mem(const ReplayEntry& mem)
 	printf("output: %f %f\n", mem.output[0], mem.output[1]);
 }
 
+
+template<class T>
+T clamp(T val, T min, T max)
+{
+	if (val >= max) return max;
+	if (val <= min) return min;
+	return val;
+}
 
 size_t arg_max(const double* arr, size_t size)
 {
@@ -127,7 +135,6 @@ int dqn_ai::get_move_dir(SuperStruct * super, bool learning)
 	// Try training every second frame.
 	if (learning && frame_counter % 2 == 0) {
 		// epsilon exploration
-		// record memory
 
 		ReplayEntry mem;
 		mem.state = std::move(game_state);
@@ -175,7 +182,7 @@ void train_ann(std::deque<ReplayEntry>& memory_batch, double reward)
 			desired_outputs[i][j] = mem.output[j];
 			if (mem.action[j]) {
 				desired_outputs[i][j] += reward * pow(AI_GAMMA, MEM_BATCH_SIZE - 1 - i);
-				desired_outputs[i][j] = max(0.0, desired_outputs[i][j]);
+				desired_outputs[i][j] = clamp(desired_outputs[i][j], 0.0, 1.0);
 			}
 		}
 	}
