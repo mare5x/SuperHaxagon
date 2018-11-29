@@ -254,7 +254,7 @@ void SuperHaxagon::update()
 		// Careful! This doesn't necessarily mean the agent died!
 		if (in_game) {
 			if (setting_autoplay_type == AUTOPLAY_DQN)
-				dqn_ai::report_death();
+				dqn_ai::report_death(&super);
 			in_game = false;
 			
 			if (setting_auto_restart) {

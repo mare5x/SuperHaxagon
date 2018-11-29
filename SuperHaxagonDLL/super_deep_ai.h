@@ -11,5 +11,5 @@ namespace dqn_ai {
 	int get_move_dir(SuperStruct* super, bool learning);
 
 	// Call this when training the agent and it dies.
-	void report_death();
+	void report_death(SuperStruct* super);
 }

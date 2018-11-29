@@ -93,10 +93,14 @@ void dqn_ai::exit()
 	genann_free(ann);
 }
 
-void dqn_ai::report_death()
+void dqn_ai::report_death(SuperStruct* super)
 {
 	// Since the only time the AI receives a reward is when it dies,
 	// we only need to know whether the AI has just died. 
+
+	static int train_iteration = 0;
+	static char time_str[32];
+	printf("Training AI [%d] : [%s] ...\n", ++train_iteration, super->get_elapsed_time(time_str));
 
 	// Try training the agent only when it dies, since 
 	// otherwise it doesn't get any reward.
@@ -160,9 +164,6 @@ int dqn_ai::get_move_dir(SuperStruct * super, bool learning)
 // <results> is an array of two elements: the left and right reward.
 void train_ann(std::deque<ReplayEntry>& memory_batch, double reward)
 {
-	static int train_iteration = 0;
-	printf("Training AI [%d] ...\n", ++train_iteration);
-
 	double desired_outputs[MEM_BATCH_SIZE][2];
 	size_t size = min(MEM_BATCH_SIZE, memory_batch.size());
 
