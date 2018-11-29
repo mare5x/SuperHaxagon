@@ -27,7 +27,7 @@ namespace {
 	const double ANN_LEARNING_RATE = 0.2;
 
 	const double AI_GAMMA = 0.9;
-	const double AI_NEUTRAL_REWARD = 0.15;  // all the AI has to do is be neutral, i.e. not die
+	const double AI_NEUTRAL_REWARD = 0.01;  // all the AI has to do is be neutral, i.e. not die
 	const double AI_LOSS_REWARD = -0.42;  // penalty when it dies
 
 	const size_t MEM_BATCH_SIZE = 32;
@@ -69,6 +69,14 @@ void _print_mem(const ReplayEntry& mem)
 }
 
 
+template<class T>
+T clamp(T val, T min, T max)
+{
+	if (val >= max) return max;
+	if (val <= min) return min;
+	return val;
+}
+
 size_t arg_max(const double* arr, size_t size)
 {
 	size_t max_idx = 0;
@@ -95,15 +103,10 @@ void dqn_ai::exit()
 
 void dqn_ai::report_death(SuperStruct* super)
 {
-	// Since the only time the AI receives a reward is when it dies,
-	// we only need to know whether the AI has just died. 
-
 	static int train_iteration = 0;
 	static char time_str[32];
 	printf("Training AI [%d] : [%s] ...\n", ++train_iteration, super->get_elapsed_time(time_str));
 
-	// Try training the agent only when it dies, since 
-	// otherwise it doesn't get any reward.
 	train_ann(replay_memory, AI_LOSS_REWARD);
 
 	frame_counter = 0;
@@ -127,7 +130,6 @@ int dqn_ai::get_move_dir(SuperStruct * super, bool learning)
 	// Try training every second frame.
 	if (learning && frame_counter % 2 == 0) {
 		// epsilon exploration
-		// record memory
 
 		ReplayEntry mem;
 		mem.state = std::move(game_state);
@@ -141,12 +143,8 @@ int dqn_ai::get_move_dir(SuperStruct * super, bool learning)
 
 		// Keep the size of the batch bounded.
 		if (replay_memory.size() >= MEM_BATCH_SIZE) {
-			replay_memory.pop_front();
+			train_ann(replay_memory, AI_NEUTRAL_REWARD);
 		}
-
-		//if (batch_counter >= MEM_BATCH_SIZE) {
-		//	train_ann(replay_memory, AI_NEUTRAL_REWARD);
-		//}
 		
 		//_print_mem(mem);
 	}
@@ -175,7 +173,7 @@ void train_ann(std::deque<ReplayEntry>& memory_batch, double reward)
 			desired_outputs[i][j] = mem.output[j];
 			if (mem.action[j]) {
 				desired_outputs[i][j] += reward * pow(AI_GAMMA, MEM_BATCH_SIZE - 1 - i);
-				desired_outputs[i][j] = max(0.0, desired_outputs[i][j]);
+				desired_outputs[i][j] = clamp(desired_outputs[i][j], 0.0, 1.0);
 			}
 		}
 	}
