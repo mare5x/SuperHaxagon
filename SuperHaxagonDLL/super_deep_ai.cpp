@@ -22,9 +22,12 @@ namespace {
 	};
 
 	const size_t ANN_INPUTS = 16;
-	const size_t ANN_HIDDEN_LAYERS = 2;
+	const size_t ANN_HIDDEN_LAYERS = 1;
+	const size_t ANN_HIDDEN_SIZE = 8;
 	const size_t ANN_OUTPUTS = 2;
-	const double ANN_LEARNING_RATE = 0.2;
+	const double ANN_LEARNING_RATE = 0.1;
+
+	const char* ANN_FPATH = "super_weights.ann";
 
 	const double AI_GAMMA = 0.9;
 	const double AI_NEUTRAL_REWARD = 0.01;  // all the AI has to do is be neutral, i.e. not die
@@ -90,14 +93,29 @@ size_t arg_max(const double* arr, size_t size)
 	return max_idx;
 }
 
-void dqn_ai::init()
+void dqn_ai::init(bool load)
 {
-	ann = genann_init(ANN_INPUTS, 2, ANN_INPUTS, ANN_OUTPUTS);
-	printf("Initialized DQN AI\n");
+	FILE* f;
+	if (load && (f = fopen(ANN_FPATH, "r"))) {
+		printf("Loading ANN from file [%s] ...\n", ANN_FPATH);
+		ann = genann_read(f);
+		fclose(f);
+	} else {
+		ann	= genann_init(ANN_INPUTS, ANN_HIDDEN_LAYERS, ANN_HIDDEN_SIZE, ANN_OUTPUTS);
+	}
+
+	printf("Initialized DQN AI [%d] [%d] [%d] [%d]\n", 
+			ann->inputs, ann->hidden_layers, ann->hidden, ann->outputs);
 }
 
-void dqn_ai::exit()
+void dqn_ai::exit(bool save)
 {
+	if (save) {
+		FILE* f = fopen(ANN_FPATH, "w");
+		genann_write(ann, f);
+		fclose(f);
+	}
+
 	genann_free(ann);
 }
 
