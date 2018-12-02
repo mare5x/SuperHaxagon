@@ -3,9 +3,9 @@
 struct SuperStruct;
 
 namespace dqn_ai {
-	void init();
+	void init(bool load = true);
 
-	void exit();
+	void exit(bool save = true);
 
 	// Query the ANN to find out in which direction the ai should move.
 	int get_move_dir(SuperStruct* super, bool learning);
