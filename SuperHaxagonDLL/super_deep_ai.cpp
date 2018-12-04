@@ -30,9 +30,11 @@ namespace {
 	const char* ANN_FPATH = "super_weights.ann";
 
 	const double AI_GAMMA = 0.9;
-	const double AI_NEUTRAL_REWARD = 0.01;  // all the AI has to do is be neutral, i.e. not die
-	const double AI_LOSS_REWARD = -0.42;  // penalty when it dies
+	const double AI_NEUTRAL_REWARD = 0.005;  // all the AI has to do is be neutral, i.e. not die
+	const double AI_LOSS_REWARD = -0.5;  // penalty when it dies
 
+	const size_t NEUTRAL_REWARD_FREQUENCY = 42;  // Give out a reward every 32 (skipped) frames.
+	const size_t HISTORY_SIZE = 1024;
 	const size_t MEM_BATCH_SIZE = 32;
 
 	unsigned long frame_counter = 0;
@@ -40,11 +42,25 @@ namespace {
 	genann* ann;
 
 	std::deque<ReplayEntry> replay_memory;
+
+	ReplayEntry* replay_batch[MEM_BATCH_SIZE];
+	double desired_ann_outputs[MEM_BATCH_SIZE][ANN_OUTPUTS];
 }
 
 
-void train_ann(std::deque<ReplayEntry>& memory_batch, double reward);
+/*
+	    <History>  <Death>	
+	+---------------+---+
+	|				| 	|
+	+---------------+---+
+*/
+
+
+void train_ann(ReplayEntry** memory_batch, const double desired_outputs[MEM_BATCH_SIZE][ANN_OUTPUTS], size_t size);
 void get_game_state(SuperStruct* super, GameState* game_state);
+void process_neutral_results(ReplayEntry** memory_batch, double desired_outputs[MEM_BATCH_SIZE][ANN_OUTPUTS], double reward);
+void process_death_results(ReplayEntry** memory_batch, double desired_outputs[MEM_BATCH_SIZE][ANN_OUTPUTS], double reward);
+void sample_memory(std::deque<ReplayEntry>& memory_batch, ReplayEntry** dst, size_t size);
 
 
 void _print_arr(const double* arr, int size)
@@ -125,7 +141,12 @@ void dqn_ai::report_death(SuperStruct* super)
 	static char time_str[32];
 	printf("Training AI [%d] : [%s] ...\n", ++train_iteration, super->get_elapsed_time(time_str));
 
-	train_ann(replay_memory, AI_LOSS_REWARD);
+	for (int i = max(replay_memory.size() - MEM_BATCH_SIZE, 0), j = 0; i < replay_memory.size(); ++i, ++j)
+		replay_batch[j] = &replay_memory[i];
+	process_death_results(replay_batch, desired_ann_outputs, AI_LOSS_REWARD);
+	train_ann(replay_batch, desired_ann_outputs, MEM_BATCH_SIZE);
+
+	replay_memory.clear();
 
 	frame_counter = 0;
 }
@@ -160,8 +181,18 @@ int dqn_ai::get_move_dir(SuperStruct * super, bool learning)
 		replay_memory.push_back(mem);
 
 		// Keep the size of the batch bounded.
-		if (replay_memory.size() >= MEM_BATCH_SIZE) {
-			train_ann(replay_memory, AI_NEUTRAL_REWARD);
+		// Q: Should we keep the most recent history or should it be random?
+		if (replay_memory.size() > HISTORY_SIZE) {
+			replay_memory.pop_front();
+		}
+
+		// Give out a survival reward.
+		if (frame_counter >= NEUTRAL_REWARD_FREQUENCY && replay_memory.size() > 2 * MEM_BATCH_SIZE) {
+			frame_counter = 0;
+			sample_memory(replay_memory, replay_batch, MEM_BATCH_SIZE);
+			process_neutral_results(replay_batch, desired_ann_outputs, AI_NEUTRAL_REWARD);
+			printf("Giving out neutral reward ...\n");
+			train_ann(replay_batch, desired_ann_outputs, MEM_BATCH_SIZE);
 		}
 		
 		//_print_mem(mem);
@@ -177,36 +208,16 @@ int dqn_ai::get_move_dir(SuperStruct * super, bool learning)
 // The ANN is fed as input GameStates and it outputs the probability of going
 // left or right based on the input in two output neurons.
 // All inputs and outputs in the ANN are normalized [0, 1] (0.5 is the mean).
-// <results> is an array of two elements: the left and right reward.
-void train_ann(std::deque<ReplayEntry>& memory_batch, double reward)
+void train_ann(ReplayEntry** memory_batch, const double desired_outputs[MEM_BATCH_SIZE][ANN_OUTPUTS], size_t size)
 {
-	double desired_outputs[MEM_BATCH_SIZE][2];
-	size_t size = min(MEM_BATCH_SIZE, memory_batch.size());
-
-	// process results
-
-	for (int i = 0; i < size; ++i) {
-		const ReplayEntry& mem = memory_batch[i];
-		for (int j = 0; j < 2; ++j) {
-			desired_outputs[i][j] = mem.output[j];
-			if (mem.action[j]) {
-				desired_outputs[i][j] += reward * pow(AI_GAMMA, MEM_BATCH_SIZE - 1 - i);
-				desired_outputs[i][j] = clamp(desired_outputs[i][j], 0.0, 1.0);
-			}
-		}
-	}
-
 	//printf("train_ann:\n");
 	//for (int i = 0; i < size; ++i) {
-	//	_print_arr(desired_outputs[i], 2);
+	//	_print_arr(desired_outputs[i], ANN_OUTPUTS);
 	//}
 
-	// the most recent results are at the end of the array
-	// pop completed
 	for (int i = 0; i < size; ++i) {
-		const ReplayEntry& mem = memory_batch.back();
+		const ReplayEntry& mem = *memory_batch[i];
 		genann_train(ann, (const double*)(&mem.state), desired_outputs[i], ANN_LEARNING_RATE);
-		memory_batch.pop_back();
 	}
 }
 
@@ -260,4 +271,50 @@ void get_game_state(SuperStruct* super, GameState* game_state)
 	game_state->player_slot = super->get_player_slot() / (double)super->get_slots();
 	game_state->world_rotation = super->get_world_rotation() / 360.0;
 	game_state->wall_speed = super->get_wall_speed_percent();
+}
+
+void process_neutral_results(ReplayEntry** memory_batch, double desired_outputs[MEM_BATCH_SIZE][ANN_OUTPUTS], double reward)
+{
+	for (int i = 0; i < MEM_BATCH_SIZE; ++i) {
+		const ReplayEntry& mem = *memory_batch[i];
+		for (int j = 0; j < ANN_OUTPUTS; ++j) {
+			desired_outputs[i][j] = mem.output[j];
+			if (mem.action[j]) {
+				desired_outputs[i][j] += reward;
+				desired_outputs[i][j] = clamp(desired_outputs[i][j], 0.0, 1.0);
+			}
+		}
+	}
+}
+
+void process_death_results(ReplayEntry** memory_batch, double desired_outputs[MEM_BATCH_SIZE][ANN_OUTPUTS], double reward)
+{
+	for (int i = 0; i < MEM_BATCH_SIZE; ++i) {
+		const ReplayEntry& mem = *memory_batch[i];
+		for (int j = 0; j < ANN_OUTPUTS; ++j) {
+			desired_outputs[i][j] = mem.output[j];
+			if (mem.action[j]) {
+				desired_outputs[i][j] += reward * pow(AI_GAMMA, MEM_BATCH_SIZE - 1 - i);
+				desired_outputs[i][j] = clamp(desired_outputs[i][j], 0.0, 1.0);
+			}
+		}
+	}
+}
+
+
+/* Randomly sample the <memory_batch> to get <size> elements into <dst>. */
+void sample_memory(std::deque<ReplayEntry>& memory_batch, ReplayEntry** dst, size_t size)
+{
+	// Reservoir-sampling [https://en.wikipedia.org/wiki/Reservoir_sampling]
+
+	size = min(size, memory_batch.size());
+	for (int i = 0; i < size; ++i)
+		dst[i] = &memory_batch[i];
+
+	for (int i = size; i < memory_batch.size(); ++i) {
+		int j = rand() % i;
+		if (j < size) {
+			dst[j] = &memory_batch[i];
+		}
+	}
 }
