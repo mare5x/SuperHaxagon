@@ -11,7 +11,7 @@ namespace {
 		double walls[6][2];  // near and far wall distance for 6 slots
 		double player_pos;
 		double player_slot;
-		double world_rotation;
+		//double world_rotation;
 		double wall_speed;
 	};
 
@@ -75,8 +75,9 @@ void _print_state(const GameState& state)
 	for (int i = 0; i < 6; ++i)
 		_print_arr(state.walls[i], 2);
 
-	printf("\n%f %f %f %f\n", state.player_pos, state.player_slot, 
-		state.world_rotation, state.wall_speed);
+	//printf("\n%f %f %f %f\n", state.player_pos, state.player_slot, 
+	//	state.world_rotation, state.wall_speed);
+	printf("\n%f %f %f\n", state.player_pos, state.player_slot, state.wall_speed);
 }
 
 void _print_mem(const ReplayEntry& mem)
@@ -239,7 +240,7 @@ void process_walls(SuperStruct* super, double walls[6][2])
 	for (int i = 0; i < 6; ++i)
 		walls[i][_NEAR] = min_dist;
 	for (int i = 0; i < 6; ++i)
-		walls[i][_FAR] = 5432;  // this value mustn't be too large otherwise it can cloud the judgement of moves
+		walls[i][_FAR] = 5432;
 
 	// Fill the near and far arrays.
 	// near[i] is the end distance of the closest wall on slot i (and less than a certain threshold value).
@@ -269,7 +270,7 @@ void get_game_state(SuperStruct* super, GameState* game_state)
 	process_walls(super, game_state->walls);
 	game_state->player_pos = super->get_player_rotation() / 360.0;
 	game_state->player_slot = super->get_player_slot() / (double)super->get_slots();
-	game_state->world_rotation = super->get_world_rotation() / 360.0;
+	//game_state->world_rotation = super->get_world_rotation() / 360.0;
 	game_state->wall_speed = super->get_wall_speed_percent();
 }
 
