@@ -19,23 +19,31 @@ namespace {
 		GameState state;
 		bool action[2];  // which of the two outputs was chosen as the action to take?
 		double output[2];  // the output of the ann using the given state as input
+		ReplayEntry* next_entry;  // The next chronological entry.
 	};
 
-	const size_t ANN_INPUTS = 16;
+	const size_t ANN_INPUTS = 15;
 	const size_t ANN_HIDDEN_LAYERS = 1;
 	const size_t ANN_HIDDEN_SIZE = 8;
 	const size_t ANN_OUTPUTS = 2;
-	const double ANN_LEARNING_RATE = 0.1;
+	const double ANN_LEARNING_RATE = 0.05;
 
 	const char* ANN_FPATH = "super_weights.ann";
 
-	const double AI_GAMMA = 0.9;
+	const double AI_GAMMA = 0.95;
 	const double AI_NEUTRAL_REWARD = 0.005;  // all the AI has to do is be neutral, i.e. not die
 	const double AI_LOSS_REWARD = -0.5;  // penalty when it dies
 
-	const size_t NEUTRAL_REWARD_FREQUENCY = 42;  // Give out a reward every 32 (skipped) frames.
+	const size_t NEUTRAL_REWARD_FREQUENCY = 60;  // Give out a reward every <?> frames.
 	const size_t HISTORY_SIZE = 1024;
-	const size_t MEM_BATCH_SIZE = 32;
+	const size_t MEM_BATCH_SIZE = 42;
+
+	/*
+			<History>  <Death>	
+		+---------------+---+
+		|				| 	|
+		+---------------+---+
+	*/
 
 	unsigned long frame_counter = 0;
 
@@ -48,17 +56,9 @@ namespace {
 }
 
 
-/*
-	    <History>  <Death>	
-	+---------------+---+
-	|				| 	|
-	+---------------+---+
-*/
-
-
 void train_ann(ReplayEntry** memory_batch, const double desired_outputs[MEM_BATCH_SIZE][ANN_OUTPUTS], size_t size);
 void get_game_state(SuperStruct* super, GameState* game_state);
-void process_neutral_results(ReplayEntry** memory_batch, double desired_outputs[MEM_BATCH_SIZE][ANN_OUTPUTS], double reward);
+void process_results(ReplayEntry** memory_batch, double desired_outputs[MEM_BATCH_SIZE][ANN_OUTPUTS], double reward);
 void process_death_results(ReplayEntry** memory_batch, double desired_outputs[MEM_BATCH_SIZE][ANN_OUTPUTS], double reward);
 void sample_memory(std::deque<ReplayEntry>& memory_batch, ReplayEntry** dst, size_t size);
 
@@ -144,7 +144,7 @@ void dqn_ai::report_death(SuperStruct* super)
 
 	for (int i = max(replay_memory.size() - MEM_BATCH_SIZE, 0), j = 0; i < replay_memory.size(); ++i, ++j)
 		replay_batch[j] = &replay_memory[i];
-	process_death_results(replay_batch, desired_ann_outputs, AI_LOSS_REWARD);
+	process_results(replay_batch, desired_ann_outputs, AI_LOSS_REWARD);
 	train_ann(replay_batch, desired_ann_outputs, MEM_BATCH_SIZE);
 
 	replay_memory.clear();
@@ -167,8 +167,9 @@ int dqn_ai::get_move_dir(SuperStruct * super, bool learning)
 
 	int action = (action_idx == 0 ? -1 : 1);
 
-	// Try training every second frame.
-	if (learning && frame_counter % 2 == 0) {
+	ReplayEntry* prev_mem = nullptr;
+
+	if (learning) {
 		// epsilon exploration
 
 		ReplayEntry mem;
@@ -178,8 +179,13 @@ int dqn_ai::get_move_dir(SuperStruct * super, bool learning)
 		//memcpy(mem.output, outputs, ANN_OUTPUTS);
 		mem.action[0] = 0 == action_idx;
 		mem.action[1] = 1 == action_idx;
+		mem.next_entry = nullptr;
 
 		replay_memory.push_back(mem);
+
+		if (prev_mem)
+			prev_mem->next_entry = &replay_memory.back();
+		prev_mem = &replay_memory.back();
 
 		// Keep the size of the batch bounded.
 		// Q: Should we keep the most recent history or should it be random?
@@ -191,7 +197,7 @@ int dqn_ai::get_move_dir(SuperStruct * super, bool learning)
 		if (frame_counter >= NEUTRAL_REWARD_FREQUENCY && replay_memory.size() > 2 * MEM_BATCH_SIZE) {
 			frame_counter = 0;
 			sample_memory(replay_memory, replay_batch, MEM_BATCH_SIZE);
-			process_neutral_results(replay_batch, desired_ann_outputs, AI_NEUTRAL_REWARD);
+			process_results(replay_batch, desired_ann_outputs, AI_NEUTRAL_REWARD);
 			printf("Giving out neutral reward ...\n");
 			train_ann(replay_batch, desired_ann_outputs, MEM_BATCH_SIZE);
 		}
@@ -274,14 +280,20 @@ void get_game_state(SuperStruct* super, GameState* game_state)
 	game_state->wall_speed = super->get_wall_speed_percent();
 }
 
-void process_neutral_results(ReplayEntry** memory_batch, double desired_outputs[MEM_BATCH_SIZE][ANN_OUTPUTS], double reward)
+void process_results(ReplayEntry** memory_batch, double desired_outputs[MEM_BATCH_SIZE][ANN_OUTPUTS], double reward)
 {
 	for (int i = 0; i < MEM_BATCH_SIZE; ++i) {
 		const ReplayEntry& mem = *memory_batch[i];
 		for (int j = 0; j < ANN_OUTPUTS; ++j) {
 			desired_outputs[i][j] = mem.output[j];
 			if (mem.action[j]) {
-				desired_outputs[i][j] += reward;
+				if (mem.next_entry) {
+					const ReplayEntry& next_mem = *mem.next_entry;
+					int target_action_idx = arg_max(next_mem.output, ANN_OUTPUTS);
+					desired_outputs[i][j] += reward + AI_GAMMA * (next_mem.output[target_action_idx] - desired_outputs[i][j]);
+				} else {
+					desired_outputs[i][j] += reward;
+				}
 				desired_outputs[i][j] = clamp(desired_outputs[i][j], 0.0, 1.0);
 			}
 		}
@@ -290,12 +302,19 @@ void process_neutral_results(ReplayEntry** memory_batch, double desired_outputs[
 
 void process_death_results(ReplayEntry** memory_batch, double desired_outputs[MEM_BATCH_SIZE][ANN_OUTPUTS], double reward)
 {
-	for (int i = 0; i < MEM_BATCH_SIZE; ++i) {
+	// The given memory_batch is in chronological order ...
+	for (int i = MEM_BATCH_SIZE - 1; i >= 0; --i) {
 		const ReplayEntry& mem = *memory_batch[i];
 		for (int j = 0; j < ANN_OUTPUTS; ++j) {
+			// Leave the action that wasn't taken alone and update only the one that was taken.
 			desired_outputs[i][j] = mem.output[j];
 			if (mem.action[j]) {
-				desired_outputs[i][j] += reward * pow(AI_GAMMA, MEM_BATCH_SIZE - 1 - i);
+				if (i == MEM_BATCH_SIZE - 1) {  // The last state before death doesn't have a "next" state.
+					desired_outputs[i][j] += reward;
+				} else {
+					int target_action_idx = arg_max(desired_outputs[i + 1], 2);
+					desired_outputs[i][j] += reward + AI_GAMMA * (desired_outputs[i + 1][target_action_idx] - desired_outputs[i][j]);
+				}
 				desired_outputs[i][j] = clamp(desired_outputs[i][j], 0.0, 1.0);
 			}
 		}
