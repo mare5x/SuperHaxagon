@@ -135,6 +135,7 @@ int get_move_dir(SuperStruct* super)
 			best_dir = 1;
 	}
 
+/*
 	printf("---------\n");
 	for (int i = 0; i < 6; ++i)
 		printf("%6d", near[i]);
@@ -144,6 +145,7 @@ int get_move_dir(SuperStruct* super)
 	printf("\n");
 
 	printf("Current %d to new %d in direction %d based on score %d\n", current_slot, best_slot, best_dir, max_score);
+*/
 
 	prev_dir = best_dir;
 

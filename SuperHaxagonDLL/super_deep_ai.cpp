@@ -1,7 +1,8 @@
 #include "stdafx.h"
 #include "super_deep_ai.h"
-#include "genann.h"
 #include "SuperStruct.h"
+#include "super_ai.h"
+#include "genann.h"
 #include <cmath>
 #include <deque>
 
@@ -16,33 +17,20 @@ namespace {
 
 	struct ReplayEntry {
 		GameState state;
-		bool action[2];  // which of the two outputs was chosen as the action to take?
-		double output[2];  // the output of the ann using the given state as input
-		ReplayEntry* next_entry;  // The next chronological entry.
+		bool action[3];  // which of the three outputs was chosen as the action to take?
 	};
 
-	const size_t ANN_INPUTS = 15;
+	const size_t ANN_INPUTS = 15;  // size of GameState
 	const size_t ANN_HIDDEN_LAYERS = 1;
 	const size_t ANN_HIDDEN_SIZE = 8;
-	const size_t ANN_OUTPUTS = 2;
-	const double ANN_LEARNING_RATE = 0.05;
+	const size_t ANN_OUTPUTS = 3;
+	const double ANN_LEARNING_RATE = 0.01;
 
 	const char* ANN_FPATH = "super_weights.ann";
 
-	const double AI_GAMMA = 0.95;
-	const double AI_NEUTRAL_REWARD = 0.005;  // all the AI has to do is be neutral, i.e. not die
-	const double AI_LOSS_REWARD = -0.5;  // penalty when it dies
-
-	const size_t NEUTRAL_REWARD_FREQUENCY = 60;  // Give out a reward every <?> frames.
-	const size_t HISTORY_SIZE = 1024;
+	const size_t HISTORY_SIZE = 18000;  // 5 minutes of 60 frames per second
 	const size_t MEM_BATCH_SIZE = 42;
-
-	/*
-			<History>  <Death>	
-		+---------------+---+
-		|				| 	|
-		+---------------+---+
-	*/
+	const size_t AI_OBSERVATION_STEPS = 32;  // How many steps to observe before training?
 
 	unsigned long frame_counter = 0;
 
@@ -57,9 +45,9 @@ namespace {
 
 void train_ann(ReplayEntry** memory_batch, const double desired_outputs[MEM_BATCH_SIZE][ANN_OUTPUTS], size_t size);
 void get_game_state(SuperStruct* super, GameState* game_state);
-void process_results(ReplayEntry** memory_batch, double desired_outputs[MEM_BATCH_SIZE][ANN_OUTPUTS], double reward);
-void process_death_results(ReplayEntry** memory_batch, double desired_outputs[MEM_BATCH_SIZE][ANN_OUTPUTS], double reward);
+void process_results(ReplayEntry** memory_batch, double desired_outputs[MEM_BATCH_SIZE][ANN_OUTPUTS]);
 void sample_memory(std::deque<ReplayEntry>& memory_batch, ReplayEntry** dst, size_t size);
+void store_replay(GameState& game_state, size_t action_idx, std::deque<ReplayEntry>& replay_memory);
 
 
 void _print_arr(const double* arr, int size)
@@ -74,8 +62,6 @@ void _print_state(const GameState& state)
 	for (int i = 0; i < 6; ++i)
 		_print_arr(state.walls[i], 2);
 
-	//printf("\n%f %f %f %f\n", state.player_pos, state.player_slot, 
-	//	state.world_rotation, state.wall_speed);
 	printf("\n%f %f %f\n", state.player_pos, state.player_slot, state.wall_speed);
 }
 
@@ -83,8 +69,7 @@ void _print_mem(const ReplayEntry& mem)
 {
 	printf("state: \n");
 	_print_state(mem.state);
-	printf("action: %d %d\n", mem.action[0], mem.action[1]);
-	printf("output: %f %f\n", mem.output[0], mem.output[1]);
+	printf("action: %d %d %d\n", mem.action[0], mem.action[1], mem.action[2]);
 }
 
 
@@ -107,6 +92,24 @@ size_t arg_max(const double* arr, size_t size)
 		}
 	}
 	return max_idx;
+}
+
+size_t get_action_idx(int action)
+{
+	switch (action) {
+	case -1: return 0;
+	case  1: return 1;
+	case  0: return 2;
+	}
+}
+
+int get_action(size_t action_idx)
+{
+	switch (action_idx) {
+	case 0: return 2;
+	case 1: return 1;
+	case 2: return 0;
+	}
 }
 
 void dqn_ai::init(bool load)
@@ -141,11 +144,6 @@ void dqn_ai::report_death(SuperStruct* super)
 	static char time_str[32];
 	printf("Training AI [%d] : [%s] ...\n", ++train_iteration, super->get_elapsed_time(time_str));
 
-	for (int i = max(replay_memory.size() - MEM_BATCH_SIZE, 0), j = 0; i < replay_memory.size(); ++i, ++j)
-		replay_batch[j] = &replay_memory[i];
-	process_results(replay_batch, desired_ann_outputs, AI_LOSS_REWARD);
-	train_ann(replay_batch, desired_ann_outputs, MEM_BATCH_SIZE);
-
 	replay_memory.clear();
 
 	frame_counter = 0;
@@ -158,52 +156,34 @@ int dqn_ai::get_move_dir(SuperStruct * super, bool learning)
 
 	++frame_counter;
 
+	// Supervised learning idea outline:
+	// Use the already functional super_ai to decide which action to take.
+	// Observe how the already written ai plays the game and sample
+	// the observations to train the ann.
+
 	GameState game_state;
 	get_game_state(super, &game_state);
 
-	_print_state(game_state);
-
-	const double* outputs = genann_run(ann, (const double*)(&game_state));
-	size_t action_idx = arg_max(outputs, ANN_OUTPUTS);
-
-	int action = (action_idx == 0 ? -1 : 1);
-
-	ReplayEntry* prev_mem = nullptr;
-
+	int action = 0;
 	if (learning) {
-		// epsilon exploration
+		// Observe the game state and super_ai's action.
 
-		ReplayEntry mem;
-		mem.state = std::move(game_state);
-		mem.output[0] = outputs[0];
-		mem.output[1] = outputs[1];
-		//memcpy(mem.output, outputs, ANN_OUTPUTS);
-		mem.action[0] = 0 == action_idx;
-		mem.action[1] = 1 == action_idx;
-		mem.next_entry = nullptr;
+		action = get_move_dir(super);
+		size_t action_idx = get_action_idx(action);
 
-		replay_memory.push_back(mem);
+		store_replay(game_state, action_idx, replay_memory);
 
-		if (prev_mem)
-			prev_mem->next_entry = &replay_memory.back();
-		prev_mem = &replay_memory.back();
-
-		// Keep the size of the batch bounded.
-		// Q: Should we keep the most recent history or should it be random?
-		if (replay_memory.size() > HISTORY_SIZE) {
-			replay_memory.pop_front();
-		}
-
-		// Give out a survival reward.
-		if (frame_counter >= NEUTRAL_REWARD_FREQUENCY && replay_memory.size() > 2 * MEM_BATCH_SIZE) {
+		if (frame_counter >= AI_OBSERVATION_STEPS && replay_memory.size() > 2 * MEM_BATCH_SIZE) {
 			frame_counter = 0;
 			sample_memory(replay_memory, replay_batch, MEM_BATCH_SIZE);
-			process_results(replay_batch, desired_ann_outputs, AI_NEUTRAL_REWARD);
-			printf("Giving out neutral reward ...\n");
+			process_results(replay_batch, desired_ann_outputs);
 			train_ann(replay_batch, desired_ann_outputs, MEM_BATCH_SIZE);
 		}
-		
-		//_print_mem(mem);
+	} else {
+		const double* outputs = genann_run(ann, (const double*)&game_state);
+		size_t action_idx = arg_max(outputs, ANN_OUTPUTS);
+		action = get_action(action_idx);
+		_print_arr(outputs, ANN_OUTPUTS);
 	}
 
 	return action;
@@ -211,11 +191,10 @@ int dqn_ai::get_move_dir(SuperStruct * super, bool learning)
 
 
 // To train the ANN, we must feed it the input states and the resulting outputs.
-// The inputs and outputs are observed by playing the game. When the ai hits a wall
-// and dies, we propagate a negative reward to the last N_FRAMES game states.
+// The inputs and outputs are observed by playing the game. 
 // The ANN is fed as input GameStates and it outputs the probability of going
-// left or right based on the input in two output neurons.
-// All inputs and outputs in the ANN are normalized [0, 1] (0.5 is the mean).
+// left, right or nowhere based on the input in three output neurons.
+// All inputs and outputs in the ANN are normalized [0, 1].
 void train_ann(ReplayEntry** memory_batch, const double desired_outputs[MEM_BATCH_SIZE][ANN_OUTPUTS], size_t size)
 {
 	//printf("train_ann:\n");
@@ -277,47 +256,14 @@ void get_game_state(SuperStruct* super, GameState* game_state)
 	game_state->wall_speed = super->get_wall_speed_percent();
 }
 
-void process_results(ReplayEntry** memory_batch, double desired_outputs[MEM_BATCH_SIZE][ANN_OUTPUTS], double reward)
+void process_results(ReplayEntry** memory_batch, double desired_outputs[MEM_BATCH_SIZE][ANN_OUTPUTS])
 {
 	for (int i = 0; i < MEM_BATCH_SIZE; ++i) {
 		const ReplayEntry& mem = *memory_batch[i];
-		for (int j = 0; j < ANN_OUTPUTS; ++j) {
-			desired_outputs[i][j] = mem.output[j];
-			if (mem.action[j]) {
-				if (mem.next_entry) {
-					const ReplayEntry& next_mem = *mem.next_entry;
-					int target_action_idx = arg_max(next_mem.output, ANN_OUTPUTS);
-					desired_outputs[i][j] += reward + AI_GAMMA * (next_mem.output[target_action_idx] - desired_outputs[i][j]);
-				} else {
-					desired_outputs[i][j] += reward;
-				}
-				desired_outputs[i][j] = clamp(desired_outputs[i][j], 0.0, 1.0);
-			}
-		}
+		for (int j = 0; j < ANN_OUTPUTS; ++j)
+			desired_outputs[i][j] = mem.action[j];
 	}
 }
-
-void process_death_results(ReplayEntry** memory_batch, double desired_outputs[MEM_BATCH_SIZE][ANN_OUTPUTS], double reward)
-{
-	// The given memory_batch is in chronological order ...
-	for (int i = MEM_BATCH_SIZE - 1; i >= 0; --i) {
-		const ReplayEntry& mem = *memory_batch[i];
-		for (int j = 0; j < ANN_OUTPUTS; ++j) {
-			// Leave the action that wasn't taken alone and update only the one that was taken.
-			desired_outputs[i][j] = mem.output[j];
-			if (mem.action[j]) {
-				if (i == MEM_BATCH_SIZE - 1) {  // The last state before death doesn't have a "next" state.
-					desired_outputs[i][j] += reward;
-				} else {
-					int target_action_idx = arg_max(desired_outputs[i + 1], 2);
-					desired_outputs[i][j] += reward + AI_GAMMA * (desired_outputs[i + 1][target_action_idx] - desired_outputs[i][j]);
-				}
-				desired_outputs[i][j] = clamp(desired_outputs[i][j], 0.0, 1.0);
-			}
-		}
-	}
-}
-
 
 /* Randomly sample the <memory_batch> to get <size> elements into <dst>. */
 void sample_memory(std::deque<ReplayEntry>& memory_batch, ReplayEntry** dst, size_t size)
@@ -333,5 +279,21 @@ void sample_memory(std::deque<ReplayEntry>& memory_batch, ReplayEntry** dst, siz
 		if (j < size) {
 			dst[j] = &memory_batch[i];
 		}
+	}
+}
+
+void store_replay(GameState& game_state, size_t action_idx, std::deque<ReplayEntry>& replay_memory)
+{
+	ReplayEntry mem;
+	mem.state = std::move(game_state);
+	for (int i = 0; i < ANN_OUTPUTS; ++i)
+		mem.action[i] = (i == action_idx);
+
+	replay_memory.push_back(mem);
+
+	// Keep the size of the batch bounded.
+	// Q: Should we keep the most recent history or should it be random?
+	if (replay_memory.size() > HISTORY_SIZE) {
+		replay_memory.pop_front();
 	}
 }
