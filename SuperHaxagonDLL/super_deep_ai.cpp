@@ -21,10 +21,10 @@ namespace {
 	};
 
 	const size_t ANN_INPUTS = 15;  // size of GameState
-	const size_t ANN_HIDDEN_LAYERS = 1;
-	const size_t ANN_HIDDEN_SIZE = 8;
+	const size_t ANN_HIDDEN_LAYERS = 2;
+	const size_t ANN_HIDDEN_SIZE = 10;
 	const size_t ANN_OUTPUTS = 3;
-	const double ANN_LEARNING_RATE = 0.01;
+	const double ANN_LEARNING_RATE = 0.1;
 
 	const char* ANN_FPATH = "super_weights.ann";
 
@@ -276,7 +276,8 @@ void sample_memory(std::deque<ReplayEntry>& memory_batch, ReplayEntry** dst, siz
 
 	for (int i = size; i < memory_batch.size(); ++i) {
 		int j = rand() % i;
-		if (j < size) {
+		// Bias non-neutral movement training.
+		if (j < (memory_batch[i].action[get_action_idx(0)] ? size * 2 / 3 : size)) {
 			dst[j] = &memory_batch[i];
 		}
 	}

@@ -39,7 +39,7 @@ namespace fmodex {
 
 
 enum MENU_OPTION : int {
-	DEBUG_LINES, AUTOPLAY, AUTOPLAY_NATURAL, AUTOPLAY_INSTANT, AUTOPLAY_DQN, CONSOLE, ZOOM
+	DEBUG_LINES, AUTOPLAY, AUTOPLAY_NATURAL, AUTOPLAY_INSTANT, AUTOPLAY_DQN, AI_LEARNING, CONSOLE, ZOOM
 };
 
 typedef SuperStruct::WORLD_ROTATION_OPTIONS ROTATION_OPTIONS;
@@ -64,6 +64,7 @@ bool setting_zoom = false;
 int setting_rotation_type = -1;
 int setting_wall_speed = -1;
 bool setting_auto_restart = true;  // automatically restart the game when dead
+bool setting_ai_learning = true;
 
 HMODULE g_dll;
 HWND g_hwnd;
@@ -277,7 +278,7 @@ void SuperHaxagon::update()
 		autoplay_instant(&super);
 		break;
 	case AUTOPLAY_DQN:
-		start_moving(dqn_ai::get_move_dir(&super, true));
+		start_moving(dqn_ai::get_move_dir(&super, setting_ai_learning));
 		break;
 	}
 
@@ -384,6 +385,9 @@ void glut_autoplay_menu_func(int option)
 	case MENU_OPTION::AUTOPLAY:
 		setting_autoplay = !setting_autoplay;
 		break;
+	case MENU_OPTION::AI_LEARNING:
+		setting_ai_learning = !setting_ai_learning;
+		break;
 	case MENU_OPTION::AUTOPLAY_NATURAL:
 		setting_autoplay_type = AUTOPLAY_NATURAL;
 		setting_autoplay = true;
@@ -437,6 +441,7 @@ void hook_glut(const char* title)
 
 	int autoplay_menu = glutCreateMenu(&glut_autoplay_menu_func);
 	glutAddMenuEntry("Enable/disable autoplay", MENU_OPTION::AUTOPLAY);
+	glutAddMenuEntry("Enable/disable dqn learning", MENU_OPTION::AI_LEARNING);
 	glutAddMenuEntry("Natural movements", MENU_OPTION::AUTOPLAY_NATURAL);
 	glutAddMenuEntry("Instant movements", MENU_OPTION::AUTOPLAY_INSTANT);
 	glutAddMenuEntry("Deep Reinforcement Learning", MENU_OPTION::AUTOPLAY_DQN);
