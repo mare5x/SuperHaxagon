@@ -8,10 +8,9 @@
 
 namespace {
 	struct GameState {
-		double walls[6][2];  // near and far wall distance for 6 slots
+		double walls[6][2];  // distance and width
 		double player_pos;
 		double player_slot;
-		//double world_rotation;
 		double wall_speed;
 	};
 
@@ -162,6 +161,8 @@ int dqn_ai::get_move_dir(SuperStruct * super, bool learning)
 	GameState game_state;
 	get_game_state(super, &game_state);
 
+	_print_state(game_state);
+
 	const double* outputs = genann_run(ann, (const double*)(&game_state));
 	size_t action_idx = arg_max(outputs, ANN_OUTPUTS);
 
@@ -233,41 +234,38 @@ void train_ann(ReplayEntry** memory_batch, const double desired_outputs[MEM_BATC
 // for the GameState so that the walls are split up into 'buckets'
 // based on distance.
 // <walls> must be an array of size [6][2] [output]
-// <walls>[i][0] -- near distance
-// <walls>[i][1] -- far distance
+// <walls>[i][0] -- wall distance
+// <walls>[i][1] -- wall width
 void process_walls(SuperStruct* super, double walls[6][2])
 {
-	const size_t _NEAR = 0;
-	const size_t _FAR = 1;
+	const size_t _DIST = 0;
+	const size_t _WIDTH = 1;
 
-	const int min_dist = 150 - super->get_wall_speed();
 	const double max_dist = 5432;
+	const double max_width = 2400;  // I don't actually know, just a guess ...
 
-	for (int i = 0; i < 6; ++i)
-		walls[i][_NEAR] = min_dist;
-	for (int i = 0; i < 6; ++i)
-		walls[i][_FAR] = 5432;
+	for (int i = 0; i < 6; ++i) {
+		walls[i][_DIST] = max_dist;
+		walls[i][_WIDTH] = 0;
+	}
 
-	// Fill the near and far arrays.
-	// near[i] is the end distance of the closest wall on slot i (and less than a certain threshold value).
-	// far[i] is the start distance of the closest wall on slot i that is further than a certain threshold value.
 	for (int i = 0; i < super->walls.size(); ++i) {
 		SuperStruct::Wall& wall = super->walls[i];
 
 		int slot = wall.slot;
-		int near_dist = wall.distance;
-		int far_dist = wall.distance + wall.width;
+		int dist = wall.distance;
+		int width = wall.width;
 
-		if (near_dist <= walls[slot][_NEAR] && far_dist > walls[slot][_NEAR])
-			walls[slot][_NEAR] = far_dist;
-		if (near_dist < walls[slot][_FAR] && near_dist > 142)
-			walls[slot][_FAR] = near_dist;
+		if (dist < walls[slot][_DIST]) {
+			walls[slot][_DIST] = dist;
+			walls[slot][_WIDTH] = width;
+		}
 	}
 
 	// Normalize the values.
 	for (int i = 0; i < 6; ++i) {
-		walls[i][_NEAR] /= max_dist;
-		walls[i][_FAR] /= max_dist;
+		walls[i][_DIST] = clamp(walls[i][_DIST] / max_dist, 0.0, 1.0);
+		walls[i][_WIDTH] = clamp(walls[i][_WIDTH] / max_width, 0.0, 1.0);
 	}
 }
 
@@ -276,7 +274,6 @@ void get_game_state(SuperStruct* super, GameState* game_state)
 	process_walls(super, game_state->walls);
 	game_state->player_pos = super->get_player_rotation() / 360.0;
 	game_state->player_slot = super->get_player_slot() / (double)super->get_slots();
-	//game_state->world_rotation = super->get_world_rotation() / 360.0;
 	game_state->wall_speed = super->get_wall_speed_percent();
 }
 
