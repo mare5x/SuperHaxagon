@@ -25,11 +25,11 @@ namespace {
 	const size_t ANN_HIDDEN_LAYERS = 2;
 	const size_t ANN_HIDDEN_SIZE = ANN_INPUTS;
 	const size_t ANN_OUTPUTS = 3;
-	const double ANN_LEARNING_RATE = 0.1;
+	const double ANN_LEARNING_RATE = 0.001;
 
 	const char* ANN_FPATH = "super_weights.ann";
 
-	const size_t TRAINING_DATA_SIZE = 500;  // How many samples of each action should be stored?
+	const size_t TRAINING_DATA_SIZE = 1000;  // How many samples of each action should be stored?
 	const size_t VALIDATION_DATA_SIZE = 0.2 * TRAINING_DATA_SIZE * ANN_OUTPUTS;  // How many replays should be stored to be used to evaluate the ann's performance?
 	const size_t MEM_BATCH_SIZE = 32;
 
@@ -312,21 +312,44 @@ void train_ann()
 	//		fail_counter = 0;
 	//}
 
-	static const size_t ITERATIONS = 5000;
-	for (int iter = 0; iter < ITERATIONS; ++iter) {
-		sample_array(training_data.data(), training_data.size(), replay_batch, MEM_BATCH_SIZE);
-		process_desired_outputs(replay_batch, desired_ann_outputs, MEM_BATCH_SIZE);
-		train_batch(replay_batch, desired_ann_outputs, MEM_BATCH_SIZE);
+	//static const size_t ITERATIONS = 5000;
+	//for (int iter = 0; iter < ITERATIONS; ++iter) {
+	//	sample_array(training_data.data(), training_data.size(), replay_batch, MEM_BATCH_SIZE);
+	//	process_desired_outputs(replay_batch, desired_ann_outputs, MEM_BATCH_SIZE);
+	//	train_batch(replay_batch, desired_ann_outputs, MEM_BATCH_SIZE);
 
-		//for (const ReplayEntry& mem : training_data) {
-		//	//double outputs[ANN_OUTPUTS] = {};
-		//	//outputs[get_action_idx(mem.action)] = 1;
-		//	//genann_train(ann, (const double*)(&mem.state), outputs, ANN_LEARNING_RATE);
-		//}
+	//	//for (const ReplayEntry& mem : training_data) {
+	//	//	//double outputs[ANN_OUTPUTS] = {};
+	//	//	//outputs[get_action_idx(mem.action)] = 1;
+	//	//	//genann_train(ann, (const double*)(&mem.state), outputs, ANN_LEARNING_RATE);
+	//	//}
 
-		if (iter % 100 == 0) {
-			double perf = evaluate_performance(validation_data.data(), validation_data.size());
+	//	if (iter % 100 == 0) {
+	//		double perf = evaluate_performance(validation_data.data(), validation_data.size());
+	//		printf("Iteration [%d]: %f\n", iter, perf);
+	//	}
+	//}
+	double perf = 0;
+	double max_perf = 0;
+	size_t iter = 0;
+	while (perf < 0.8) {
+		for (const ReplayEntry& mem : training_data) {
+			double outputs[ANN_OUTPUTS] = {};
+			outputs[get_action_idx(mem.action)] = 1;
+			genann_train(ann, (const double*)(&mem.state), outputs, ANN_LEARNING_RATE);
+		}
+
+		if (++iter % 100 == 0) {
+			perf = evaluate_performance(validation_data.data(), validation_data.size());
 			printf("Iteration [%d]: %f\n", iter, perf);
+			if (perf > max_perf) {
+				max_perf = perf;
+
+				// Backup the best results ...
+				FILE* f = fopen(ANN_FPATH, "w");
+				genann_write(ann, f);
+				fclose(f);
+			}
 		}
 	}
 }
@@ -426,7 +449,8 @@ void dqn_ai::report_death(SuperStruct* super)
 	static int train_iteration = 0;
 	static char time_str[32];
 	printf("Training AI [%d] : [%s] ...\n", ++train_iteration, super->get_elapsed_time(time_str));
-	train_ann();
+	if (training_data_acquired())
+		train_ann();
 
 	//if (training_data_acquired()) {
 	//	training_data.clear();
