@@ -2,6 +2,8 @@
 #include "super_deep_ai.h"
 #include "SuperStruct.h"
 #include "super_ai.h"
+#include "win_console.h"
+#include "ProgressBar.h"
 #include "genann.h"
 #include <cmath>
 #include <vector>
@@ -25,24 +27,32 @@ namespace {
 	const size_t ANN_HIDDEN_LAYERS = 2;
 	const size_t ANN_HIDDEN_SIZE = ANN_INPUTS;
 	const size_t ANN_OUTPUTS = 3;
-	const double ANN_LEARNING_RATE = 0.001;
+	const double ANN_LEARNING_RATE = 0.1;
 
 	const char* ANN_FPATH = "super_weights.ann";
+	const char* TRAINING_DATA_PATH = "training_data.txt";
+	const char* VALIDATION_DATA_PATH = "validation_data.txt";
 
-	const size_t TRAINING_DATA_SIZE = 1000;  // How many samples of each action should be stored?
+	const size_t TRAINING_DATA_SIZE = 9000;  // How many samples of each action should be stored?
 	const size_t VALIDATION_DATA_SIZE = 0.2 * TRAINING_DATA_SIZE * ANN_OUTPUTS;  // How many replays should be stored to be used to evaluate the ann's performance?
 	const size_t MEM_BATCH_SIZE = 32;
 
-	// IDEA OUTLINE:
+	// IDEA OUTLINE (behavioral cloning):
 	// Over the course of some time, sample training data to be used for training.
 	// Sample an equal amount of samples for each possible action taken by the ai
 	// (to ensure balanced training).
 	// Store a percentage of the sampled training data to be used for evaluating
 	// the performance of the ann. (That data is not used for training.)
 	// After the training data has been acquired, train the ann and measure the
-	// performance. Train by using mini batches of sampled training data.
+	// performance. (Train by using mini batches of sampled training data.)
 	// Continue training until improvement stops. Then start a new game
 	// and repeat the process.
+
+	// It turns out that doing the above outlined process isn't very effective
+	// because it only trains on "perfect" data, i.e. it doesn't know how to
+	// react when it makes a mistake. To fix this, use Direct Policy Learning via 
+	// Interactive demonstrator, which is better in the sense that more training states are
+	// gathered by querying the expert player when mistakes are made.
 
 	genann* ann;
 
@@ -146,6 +156,68 @@ int get_action(size_t action_idx)
 	case 1: return 1;
 	case 2: return 0;
 	}
+}
+
+ReplayEntry read_replay_entry(FILE* f)
+{
+	ReplayEntry mem = {};
+	for (int j = 0; j < 6; ++j)
+		for (int k = 0; k < 2; ++k)
+			fscanf(f, "%lf", &mem.state.walls[j][k]);
+	fscanf(f, "%lf %lf %lf", &mem.state.player_pos, &mem.state.player_slot, &mem.state.wall_speed);
+	fscanf(f, "%d", &mem.action);
+	return mem;
+}
+
+void write_replay_entry(FILE* f, const ReplayEntry& mem)
+{
+	const GameState& state = mem.state;
+	for (int j = 0; j < 6; ++j) {
+		for (int k = 0; k < 2; ++k)
+			fprintf(f, "%f ", state.walls[j][k]);
+		fprintf(f, "\n");
+	}
+	fprintf(f, "%f %f %f\n", state.player_pos, state.player_slot, state.wall_speed);
+	fprintf(f, "%d\n", mem.action);
+}
+
+void write_replay_data(const char* path, const ReplayEntry* src, size_t size)
+{
+	FILE* f = fopen(path, "w");
+	fprintf(f, "%d\n", size);
+	for (int i = 0; i < size; ++i) {
+		const ReplayEntry& mem = src[i];
+		write_replay_entry(f, mem);
+	}
+	fclose(f);
+}
+
+bool read_replay_data(const char* path, std::vector<ReplayEntry>& dst_data, std::array<int, ANN_OUTPUTS>& dst_amounts)
+{
+	FILE* f = fopen(path, "r");
+	if (!f) return false;
+
+	size_t data_size = 0;
+	fscanf(f, "%d", &data_size);
+	for (int i = 0; i < data_size; ++i) {
+		ReplayEntry mem = read_replay_entry(f);
+		dst_data.push_back(mem);
+		++dst_amounts[get_action_idx(mem.action)];
+	}
+	fclose(f);
+	return true;
+}
+
+void write_results()
+{
+	printf("Writing results ...\n");
+
+	write_replay_data(TRAINING_DATA_PATH, training_data.data(), training_data.size());
+	write_replay_data(VALIDATION_DATA_PATH, validation_data.data(), validation_data.size());
+
+	FILE* f = fopen(ANN_FPATH, "w");
+	genann_write(ann, f);
+	fclose(f);
 }
 
 // <walls> must be an array of size [6][2] [output]
@@ -286,8 +358,8 @@ void train_ann()
 {
 	printf("Training AI ...\n");
 
-	static ReplayEntry* replay_batch[MEM_BATCH_SIZE];
-	static double desired_ann_outputs[MEM_BATCH_SIZE][ANN_OUTPUTS];
+	//static ReplayEntry* replay_batch[MEM_BATCH_SIZE];
+	//static double desired_ann_outputs[MEM_BATCH_SIZE][ANN_OUTPUTS];
 
 	//double prev_perf = -1;
 	//double cur_perf = 0;
@@ -329,79 +401,33 @@ void train_ann()
 	//		printf("Iteration [%d]: %f\n", iter, perf);
 	//	}
 	//}
-	double perf = 0;
-	double max_perf = 0;
-	size_t iter = 0;
-	while (perf < 0.8) {
+	static const size_t ITERATIONS = 250;
+	static ProgressBar progress_bar(ITERATIONS);
+	static double max_perf = 0;
+	static size_t total_iterations = 0;
+	progress_bar.reset();
+
+	for (int it = 0; it < ITERATIONS; ++it, ++total_iterations) {
 		for (const ReplayEntry& mem : training_data) {
 			double outputs[ANN_OUTPUTS] = {};
 			outputs[get_action_idx(mem.action)] = 1;
 			genann_train(ann, (const double*)(&mem.state), outputs, ANN_LEARNING_RATE);
 		}
 
-		if (++iter % 100 == 0) {
-			perf = evaluate_performance(validation_data.data(), validation_data.size());
-			printf("Iteration [%d]: %f\n", iter, perf);
-			if (perf > max_perf) {
-				max_perf = perf;
-
-				// Backup the best results ...
-				FILE* f = fopen(ANN_FPATH, "w");
-				genann_write(ann, f);
-				fclose(f);
-			}
-		}
+		progress_bar.update();
 	}
-}
 
-ReplayEntry read_replay_entry(FILE* f)
-{
-	ReplayEntry mem = {};
-	for (int j = 0; j < 6; ++j) 
-		for (int k = 0; k < 2; ++k)
-			fscanf(f, "%lf", &mem.state.walls[j][k]);
-	fscanf(f, "%lf %lf %lf", &mem.state.player_pos, &mem.state.player_slot, &mem.state.wall_speed);
-	fscanf(f, "%d", &mem.action);
-	return mem;
-}
+	progress_bar.clear();
 
-void write_replay_entry(FILE* f, const ReplayEntry& mem)
-{
-	const GameState& state = mem.state;
-	for (int j = 0; j < 6; ++j) {
-		for (int k = 0; k < 2; ++k)
-			fprintf(f, "%f ", state.walls[j][k]);
-		fprintf(f, "\n");
+	double perf = evaluate_performance(validation_data.data(), validation_data.size());
+	if (perf > max_perf) {
+		max_perf = perf;
+		write_results();
 	}
-	fprintf(f, "%f %f %f\n", state.player_pos, state.player_slot, state.wall_speed);
-	fprintf(f, "%d\n", mem.action);
-}
 
-void write_replay_data(const char* path, const ReplayEntry* src, size_t size)
-{
-	FILE* f = fopen(path, "w");
-	fprintf(f, "%d\n", size);
-	for (int i = 0; i < size; ++i) {
-		const ReplayEntry& mem = src[i];
-		write_replay_entry(f, mem);
-	}
-	fclose(f);
-}
-
-bool read_replay_data(const char* path, std::vector<ReplayEntry>& dst_data, std::array<int, ANN_OUTPUTS>& dst_amounts)
-{
-	FILE* f = fopen(path, "r");
-	if (!f) return false;
-
-	size_t data_size = 0;
-	fscanf(f, "%d", &data_size);
-	for (int i = 0; i < data_size; ++i) {
-		ReplayEntry mem = read_replay_entry(f);
-		dst_data.push_back(mem);
-		++dst_amounts[get_action_idx(mem.action)];
-	}
-	fclose(f);
-	return true;
+	set_text_formatting(32);
+	printf("Iteration [%d]: %f\n", total_iterations, perf);
+	set_text_formatting(0);
 }
 
 void dqn_ai::init(bool load)
@@ -422,42 +448,29 @@ void dqn_ai::init(bool load)
 	training_data.reserve(TRAINING_DATA_SIZE * ANN_OUTPUTS);
 	validation_data.reserve(VALIDATION_DATA_SIZE);
 
-	if (read_replay_data("training_data.txt", training_data, training_data_amounts))
+	if (read_replay_data(TRAINING_DATA_PATH, training_data, training_data_amounts))
 		printf("Loading training data ...\n");
-	if (read_replay_data("validation_data.txt", validation_data, validation_data_amounts))
+	if (read_replay_data(VALIDATION_DATA_PATH, validation_data, validation_data_amounts))
 		printf("Loading validation data ...\n");
 }
 
 void dqn_ai::exit(bool save)
 {
-	if (save) {
-		printf("Writing training data ...\n");
-		write_replay_data("training_data.txt", training_data.data(), training_data.size());
-		printf("Writing validation data ...\n");
-		write_replay_data("validation_data.txt", validation_data.data(), validation_data.size());
-
-		FILE* f = fopen(ANN_FPATH, "w");
-		genann_write(ann, f);
-		fclose(f);
-	}
+	if (save)
+		write_results();
 
 	genann_free(ann);
 }
 
 void dqn_ai::report_death(SuperStruct* super)
 {
+	//static bool data_saved = false;
 	static int train_iteration = 0;
 	static char time_str[32];
 	printf("Training AI [%d] : [%s] ...\n", ++train_iteration, super->get_elapsed_time(time_str));
-	if (training_data_acquired())
-		train_ann();
-
-	//if (training_data_acquired()) {
-	//	training_data.clear();
-	//	training_data_amounts.fill(0);
-	//	validation_data.clear();
-	//	validation_data_amounts.fill(0);
-	//}
+	train_ann();
+	if (train_iteration % 10 == 0)
+		write_results();
 
 	frame_counter = 0;
 }
@@ -469,9 +482,6 @@ int dqn_ai::get_move_dir(SuperStruct * super, bool learning)
 
 	++frame_counter;
 
-	if (learning && training_data_acquired())
-		return get_move_dir(super);
-
 	// Supervised learning idea outline:
 	// Use the already functional super_ai to decide which action to take.
 	// Observe how the already written ai plays the game and sample
@@ -482,10 +492,17 @@ int dqn_ai::get_move_dir(SuperStruct * super, bool learning)
 
 	int action = 0;
 	if (learning) {
-		action = get_move_dir(super);
-		store_replay(game_state, action);
-		if (training_data_acquired())
-			train_ann();
+		// Epsilon exploration idea (direct policy learning):
+		// Let the ann play to explore more states, while 
+		// listening to the AI on what action should have been taken
+		// instead.
+		static const double EXPLORATION_EPSILON = 0.2;
+		double eps = rand() / static_cast<double>(RAND_MAX);
+		int ai_action = get_move_dir(super);
+		action = ai_action;
+		if (eps < EXPLORATION_EPSILON)
+			action = get_ann_action(game_state);
+		store_replay(game_state, ai_action);
 	}
 	else {
 		action = get_ann_action(game_state);
