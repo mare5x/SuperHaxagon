@@ -2,13 +2,19 @@
 #include "win_console.h"
 #include <cstdio>
 
-
 FILE* p_cout;
 
 void open_console()
 {
 	AllocConsole();
 	freopen_s(&p_cout, "CONOUT$", "w", stdout);
+
+	// Set output mode to handle virtual terminal sequences
+	HANDLE hOut = GetStdHandle(STD_OUTPUT_HANDLE);
+	DWORD dwMode = 0;
+	GetConsoleMode(hOut, &dwMode);
+	dwMode |= ENABLE_VIRTUAL_TERMINAL_PROCESSING;
+	SetConsoleMode(hOut, dwMode);
 }
 
 void close_console()
@@ -37,4 +43,9 @@ void show_console()
 {
 	if (!IsWindowVisible(GetConsoleWindow()))
 		ShowWindow(GetConsoleWindow(), SW_SHOW);
+}
+
+void set_text_formatting(int value)
+{
+	printf("\x1b[%dm", value);
 }
