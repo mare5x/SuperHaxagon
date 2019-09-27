@@ -57,14 +57,14 @@ int mouse_x, mouse_y;
 bool console_change_requested = false;
 
 bool setting_autoplay = true;
-int setting_autoplay_type = MENU_OPTION::AUTOPLAY_DQN;
+int setting_autoplay_type = MENU_OPTION::AUTOPLAY_NATURAL;
 bool setting_debug_lines = true;
 bool setting_console = true;
 bool setting_zoom = false;
 int setting_rotation_type = -1;
 int setting_wall_speed = -1;
-bool setting_auto_restart = true;  // automatically restart the game when dead
-bool setting_ai_learning = true;
+bool setting_auto_restart = false;  // automatically restart the game when dead
+bool setting_ai_learning = false;
 
 HMODULE g_dll;
 HWND g_hwnd;
@@ -254,7 +254,7 @@ void SuperHaxagon::update()
 	if (!super.is_in_game()) {
 		// Careful! This doesn't necessarily mean the agent died!
 		if (in_game) {
-			if (setting_autoplay_type == AUTOPLAY_DQN)
+			if (setting_autoplay_type == AUTOPLAY_DQN && setting_ai_learning)
 				dqn_ai::report_death(&super);
 			in_game = false;
 			
@@ -395,9 +395,11 @@ void glut_autoplay_menu_func(int option)
 	case MENU_OPTION::AUTOPLAY_INSTANT:
 		setting_autoplay_type = AUTOPLAY_INSTANT;
 		setting_autoplay = true;
+		break;
 	case MENU_OPTION::AUTOPLAY_DQN:
 		setting_autoplay_type = AUTOPLAY_DQN;
 		setting_autoplay = true;
+		break;
 	default:
 		break;
 	}

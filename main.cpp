@@ -66,7 +66,7 @@ int main(int argc, char** argv, char** env)
 	if (dll_handle)
 		printf("%x\n", dll_handle);
 	else
-		printf("Error injecting DLL!\n");
+		printf("Error injecting DLL! Make sure the path is absolute.\n");
 
 	CloseHandle(hProcess);
 
