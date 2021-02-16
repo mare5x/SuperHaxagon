@@ -2,7 +2,7 @@
 
 Super Hexagon bot.
 
-## Overview
+## About
 
 **SuperHaxagon** is a _DLL injection_ based bot for the game _Super Hexagon_.
 
@@ -11,7 +11,7 @@ to provide custom drawing and to modify the game state to the user's liking.
 
 Additionally, there are 3 different AI bot implementations that can beat the game.
 A hacky teleportation approach, a natural key emulated approach and a neural network approach.
-The neural network approach is a work in progress (**WIP**).  
+The neural network approach is a work in progress.  
 
 ![Demo GIF](./demo.gif)  
 
