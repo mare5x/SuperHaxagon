@@ -246,11 +246,6 @@ void SuperHaxagon::update()
 	static bool in_game = false;
 	static bool restart_key_pending = false;
 
-	if (restart_key_pending) {
-		SendMessage(g_hwnd, WM_KEYUP, VK_SPACE, 0);
-		restart_key_pending = false;
-	}
-
 	if (!super.is_in_game()) {
 		// Careful! This doesn't necessarily mean the agent died!
 		if (in_game) {
@@ -258,14 +253,20 @@ void SuperHaxagon::update()
 				dqn_ai::report_death(&super);
 			in_game = false;
 			
-			if (setting_auto_restart) {
+			if (setting_auto_restart || setting_ai_learning) {
 				SendMessage(g_hwnd, WM_KEYDOWN, VK_SPACE, 0);
 				restart_key_pending = true;
 			}
 		}
 	}
-	else
+    else {
 		in_game = true;
+
+        if (restart_key_pending) {
+            SendMessage(g_hwnd, WM_KEYUP, VK_SPACE, 0);
+            restart_key_pending = false;
+        }
+    }
 
 	if (!setting_autoplay) return;
 
