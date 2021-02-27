@@ -1,0 +1,13 @@
+Debug/
+.vs/
+*.obj
+*.vcxproj.*
+/SuperHaxagon.exe
+/notes.txt
+/addresses.txt
+/addresses.txt
+training_data.txt
+validation_data.txt
+*.gch
+*.exe
+*.pyc
