@@ -11,3 +11,4 @@ validation_data.txt
 *.gch
 *.exe
 *.pyc
+*.model

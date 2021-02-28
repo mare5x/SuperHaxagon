@@ -35,7 +35,6 @@ namespace {
 
     super_client::SuperClient client(super_client::g_context);
 
-    unsigned long train_iteration = 0;
 	unsigned long frame_counter = 0;
 }
 
@@ -118,13 +117,16 @@ void dqn_ai::init(bool load)
     client.init();
 }
 
-void dqn_ai::exit(bool save) { }
+void dqn_ai::exit(bool save) 
+{
+    client.close();
+    super_client::close();
+}
 
 void dqn_ai::report_death(SuperStruct* super)
 {
     client.send_episode_score(frame_counter);
 	frame_counter = 0;
-    train_iteration += 1;
 }
 
 int dqn_ai::get_move_dir(SuperStruct* super, bool learning)
@@ -140,10 +142,7 @@ int dqn_ai::get_move_dir(SuperStruct* super, bool learning)
     int action = 0;
 	if (learning) {
 		int expert_action = get_move_dir(super);
-        
         action = client.request_action(game_state, expert_action);
-        if (train_iteration == 0)
-            action = expert_action;
     }
     else {
         action = client.request_action(game_state);

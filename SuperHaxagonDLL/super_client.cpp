@@ -28,7 +28,7 @@ namespace super_client {
         struct StateAction_t {
             int32_t type;
             dqn_ai::GameState state;
-        } msg{ STATE_EXPERT_ACTION, state };
+        } msg{ STATE_ACTION, state };
 
         printf("REQ: request action\n");
         int reply = request(&msg, sizeof(StateAction_t));
@@ -72,5 +72,10 @@ namespace super_client {
         socket.recv(reply, zmq::recv_flags::none);
 
         return *reply.data<int>();
+    }
+
+    void close()
+    {
+        g_context.close();
     }
 }

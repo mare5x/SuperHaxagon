@@ -35,18 +35,24 @@ class DAGGERServer(ReplyServer):
         self.model = DAGGER.load()
 
     def process_msg(self, msg):
-        print(f"Received {msg}")
+        # print(f"Received {msg}")
         
-        # msg_type = struct.unpack('=i', msg[:4])[0]
-        # if msg_type == 0:  # ACTION
-        #     action = struct.unpack(f"2i15f", msg)
-        #     print(f"Got action: {action}")
-        # elif msg_type == 1:
-        #     death = struct.unpack("2i", msg)
-        #     print(f"Got death: {death}")
-        # return msg
-
-        return struct.pack("i", 0)
+        # The C++ client sends raw struct bytes as defined in super_client.cpp
+        GameState_unpack = "15f"
+        msg_type = struct.unpack('=i', msg[:4])[0]
+        reply = struct.pack("i", 0)
+        if msg_type == 0:  # STATE_ACTION
+            _, *state = struct.unpack(f"i{GameState_unpack}", msg)
+            action = self.model.get_action(state)
+            reply = struct.pack("i", action)
+        elif msg_type == 1:  # STATE_EXPERT_ACTION
+            _, expert, *state = struct.unpack(f"ii{GameState_unpack}", msg)
+            action = self.model.get_action(state, expert)
+            reply = struct.pack("i", action)
+        elif msg_type == 2:  # EPISODE_SCORE
+            _, score = struct.unpack("ii", msg)
+            self.model.on_episode_end(score)
+        return reply
 
 
 if __name__ == "__main__":
@@ -54,3 +60,5 @@ if __name__ == "__main__":
     server = DAGGERServer(context)
     while True:
         server.listen()
+
+

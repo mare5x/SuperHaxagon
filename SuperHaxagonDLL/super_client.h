@@ -8,11 +8,14 @@ namespace super_client
 {
     extern zmq::context_t g_context;
 
+    void close();
+
     class SuperClient {
     public:
         SuperClient(zmq::context_t& ctx);
 
         void init();
+        void close() { socket.close(); }
 
         int request_action(const dqn_ai::GameState& state);
         int request_action(const dqn_ai::GameState& state, const int action);

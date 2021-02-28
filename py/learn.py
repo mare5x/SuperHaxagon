@@ -3,6 +3,7 @@ import random
 
 import numpy as np
 from sklearn.ensemble import RandomForestClassifier
+from sklearn.exceptions import NotFittedError
 from sklearn.metrics import classification_report, accuracy_score
 import joblib
 
@@ -39,11 +40,12 @@ class DAGGER:
             return cls()
 
     def write(self):
+        print(f"Writing to {self.MODEL_FPATH} ...")
         joblib.dump(self, self.MODEL_FPATH)
 
     def train_model(self):
-        X = np.array(X_train)
-        y = np.array(y_train)
+        X = np.array(self.X_train)
+        y = np.array(self.y_train)
         self.model.fit(X, y)
 
     def store_experience(self, state, action):
@@ -57,7 +59,7 @@ class DAGGER:
             self.y_test.append(action)
         else:
             self.X_train.append(state)
-            self.y_train.append(state)
+            self.y_train.append(action)
         
         self.data_in_iteration += 1
         if self.data_in_iteration % 100 == 0:
@@ -65,11 +67,18 @@ class DAGGER:
 
         return True
 
-    def get_action(self, state):
-        # The expert is implemented on the C++ side ...
-        # if self.iteration == 0:
-        #     return expert action
-        return self.model.predict(state)
+    def get_action(self, state, expert_action=None):
+        # The expert is implemented on the C++ side. 
+        # The expert action is passed along with the state from the 'server'.
+        if expert_action is not None:
+            self.store_experience(state, expert_action)
+            if self.iteration == 0:
+                return expert_action
+        try:
+            state = np.array(state).reshape(1, -1)  # Model requires 2D array
+            return self.model.predict(state)[0]
+        except NotFittedError:
+            return 0
 
     def evaluate_performance(self):
         X = np.array(self.X_test)

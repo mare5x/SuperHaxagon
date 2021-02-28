@@ -19,7 +19,4 @@ namespace dqn_ai {
 
 	// Call this when training the agent and it dies.
 	void report_death(SuperStruct* super);
-
-    // Respond to requests made from the client process.
-    void respond_server();
 }
