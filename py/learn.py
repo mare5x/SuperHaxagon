@@ -1,11 +1,40 @@
 import pathlib
 import random
+from queue import Empty
+from multiprocessing import Process, Queue
 
 import numpy as np
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.exceptions import NotFittedError
 from sklearn.metrics import classification_report, accuracy_score
 import joblib
+import matplotlib.animation
+from matplotlib import pyplot as plt
+
+
+plot_queue = Queue()  # Plot tasks are put into this queue and taken by the plotting process.
+
+def plot_loop(q):
+    data = []
+    fig, ax = plt.subplots()
+
+    def update(f):
+        try:
+            item = q.get_nowait()
+            data.extend(item)
+            ax.cla()
+            ax.plot(data)
+            ax.plot(np.convolve(np.array(data), np.ones(10) / 10, mode='same'))
+        except Empty:
+            pass
+    
+    ani = matplotlib.animation.FuncAnimation(fig, update, frames=None)  # Docs: You must store the created Animation in a variable that lives as long as the animation should run. Otherwise, the Animation object will be garbage-collected and the animation stops.
+    plt.show()
+
+def start_plotting():
+    proc = Process(target=plot_loop, args=(plot_queue,), daemon=True)
+    proc.start()
+    print(f"Plotter PID: {proc.pid}")
 
 
 class DAGGER:
@@ -88,7 +117,8 @@ class DAGGER:
 
     def on_episode_end(self, score):
         self.score_history.append(score)
-        
+        plot_queue.put([score])
+
         if self.data_in_iteration >= self.DATA_PER_ITERATION:
             print(f"Training iteration: {self.iteration}\n\tTrain: {len(self.X_train)} || Test: {len(self.X_test)}")
             self.train_model()
@@ -100,5 +130,3 @@ class DAGGER:
             self.data_in_iteration = 0
 
             self.write()
-
-

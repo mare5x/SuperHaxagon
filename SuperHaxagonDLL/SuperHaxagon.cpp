@@ -488,21 +488,31 @@ void draw_debug_strings()
 	const int y = 28;
 	int line = 1;
 
-	char text[16] = {};
-	snprintf(text, 16, "%d %d", mouse_x, mouse_y);
+	static char text[1024] = {};
+	snprintf(text, sizeof(text), "%d %d", mouse_x, mouse_y);
 	draw_text(text, x, y * line++);
 
-	snprintf(text, 16, "%d", super.get_world_rotation());
+	snprintf(text, sizeof(text), "%d", super.get_world_rotation());
 	draw_text(text, x, y * line++);
 
-	//snprintf(text, 16, "%d", super.get_slots());
+	//snprintf(text, sizeof(text), "%d", super.get_slots());
 	//draw_text(text, x, y * line++);
 
-	snprintf(text, 16, "%d", super.get_player_rotation());
+	snprintf(text, sizeof(text), "%d", super.get_player_rotation());
 	draw_text(text, x, y * line++);
 
-	snprintf(text, 16, "%d", super.get_wall_speed());
+	snprintf(text, sizeof(text), "%d", super.get_wall_speed());
 	draw_text(text, x, y * line++);
+
+    line = 4;
+    int w = window_rect.right - window_rect.left + 1;
+    int h = window_rect.bottom - window_rect.top + 1;
+    snprintf(text, sizeof(text), "Learn: %d", setting_ai_learning);
+    draw_text(text, w - 128, h - y * line--);
+    snprintf(text, sizeof(text), "AI control: %d", setting_autoplay);
+    draw_text(text, w - 128, h - y * line--);
+    snprintf(text, sizeof(text), "AI type: %d", setting_autoplay_type);
+    draw_text(text, w - 128, h - y * line--);
 }
 
 void start_moving(int direction)

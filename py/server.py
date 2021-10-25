@@ -10,7 +10,7 @@ import struct
 
 import zmq
 
-from learn import DAGGER
+import learn
 
 
 class ReplyServer:
@@ -32,7 +32,8 @@ class DAGGERServer(ReplyServer):
     def __init__(self, ctx):
         super().__init__(ctx)
         
-        self.model = DAGGER.load()
+        self.model = learn.DAGGER.load()
+        self.start_plotting()
 
     def process_msg(self, msg):
         # print(f"Received {msg}")
@@ -54,11 +55,13 @@ class DAGGERServer(ReplyServer):
             self.model.on_episode_end(score)
         return reply
 
+    def start_plotting(self):
+        learn.plot_queue.put(self.model.score_history)
+        learn.start_plotting()
+
 
 if __name__ == "__main__":
     context = zmq.Context()
     server = DAGGERServer(context)
     while True:
         server.listen()
-
-
