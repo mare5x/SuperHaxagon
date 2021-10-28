@@ -5,6 +5,7 @@
 #include "memory_tools.h"
 #include "win_console.h"
 #include "super_deep_ai.h"
+#include "BitmapPlusPlus.hpp"
 
 
 namespace fmodex {
@@ -51,7 +52,7 @@ int VIEWPORT_WIDTH = 768;
 int VIEWPORT_HEIGHT = 480;
 
 // Used to allow window resizing. 
-RECT window_rect = { 0, 0, 768, 480};
+RECT window_rect = { 0, 0, 768 - 1, 480 - 1};
 
 int mouse_x, mouse_y;
 bool console_change_requested = false;
@@ -99,6 +100,8 @@ void draw_debug_strings();
 void start_moving(int direction);
 void stop_moving();
 
+void screenshot(const char* path);
+
 
 LRESULT CALLBACK input_handler(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
 {
@@ -114,12 +117,16 @@ LRESULT CALLBACK input_handler(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lPara
 		// Use the Q and E keys to move the player cursor to the next or previous slot.
 		super.set_player_slot((super.get_player_slot() + (wParam == 0x51 ? 1 : -1)) % super.get_slots());
 	}
+    else if (uMsg == WM_KEYDOWN && wParam == VK_F12) {
+        // F12 for screenshot.
+        screenshot("screenshot.bmp");
+    }
 
 	// Allow window resizing:
 	if (uMsg == WM_SIZING)
 		window_rect = *(RECT*)lParam;
 	if (uMsg == WM_EXITSIZEMOVE)
-		glutReshapeWindow(window_rect.right - window_rect.left, window_rect.bottom - window_rect.top);
+		glutReshapeWindow(window_rect.right - window_rect.left + 1, window_rect.bottom - window_rect.top + 1);
 
 	return orig_wnd_proc(hwnd, uMsg, wParam, lParam);
 }
@@ -533,4 +540,26 @@ void stop_moving()
 	SendMessage(g_hwnd, WM_KEYUP, moving_direction > 0 ? VK_LEFT : VK_RIGHT, 0);
 	
 	moving_direction = 0;
+}
+
+void screenshot(const char* path)
+{
+    printf("Screenshot: %s\n", path);
+    int w = window_rect.right - window_rect.left + 1;
+    int h = window_rect.bottom - window_rect.top + 1;
+    // NOTE: Using bytes and 3*w*h doesn't work because of 4 byte alignment.
+    // Instead use RGBA with 32-bit ints.
+    int32_t* pixels = new int32_t[w * h];
+    // Read pixels starting from lower left corner:
+    glReadPixels(0, 0, w, h, GL_RGBA, GL_UNSIGNED_BYTE, pixels);
+    bmp::Bitmap img(w, h);
+    for (int y = 0; y < h; ++y) {
+        for (int x = 0; x < w; ++x) {
+            int c = pixels[y * w + x];
+            // NOTE: RGBA is stored in memory as ABGR ...
+            img.Set(x, h - y - 1, bmp::Pixel((c & 0xFF), (c & 0xFF00) >> 8, (c & 0xFF0000) >> 16));
+        }
+    }
+    img.Save(path);
+    delete[] pixels;
 }

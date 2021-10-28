@@ -112,6 +112,7 @@ copy "E:\Mare5\dev\libs\cpp\libzmq-v141-4_3_2\*.dll" "E:\Games\Super Hexagon\"
     </PostBuildEvent>
   </ItemDefinitionGroup>
   <ItemGroup>
+    <ClInclude Include="BitmapPlusPlus.hpp" />
     <ClInclude Include="genann.h" />
     <ClInclude Include="glut_hook.h" />
     <ClInclude Include="memory_tools.h" />
