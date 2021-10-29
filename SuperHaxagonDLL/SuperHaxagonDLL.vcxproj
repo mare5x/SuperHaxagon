@@ -73,7 +73,8 @@
       <Command>copy "$(TargetDir)$(TargetName).dll" "E:\Games\Super Hexagon\$(TargetName).dll"
 
 copy "E:\Mare5\dev\libs\cpp\libzmq-v141-4_3_2\*.dll" "E:\Games\Super Hexagon\"
-</Command>
+
+xcopy "$(ProjectDir)Shaders" "E:\Games\Super Hexagon\Shaders" /s /e /h /i /y</Command>
     </PostBuildEvent>
     <PostBuildEvent>
       <Message>Copy DLL to Super Hexagon game folder ... </Message>
@@ -105,7 +106,8 @@ copy "E:\Mare5\dev\libs\cpp\libzmq-v141-4_3_2\*.dll" "E:\Games\Super Hexagon\"
       <Command>copy "$(TargetDir)$(TargetName).dll" "E:\Games\Super Hexagon\$(TargetName).dll"
 
 copy "E:\Mare5\dev\libs\cpp\libzmq-v141-4_3_2\*.dll" "E:\Games\Super Hexagon\"
-</Command>
+
+xcopy "$(ProjectDir)Shaders" "E:\Games\Super Hexagon\Shaders" /s /e /h /i /y</Command>
     </PostBuildEvent>
     <PostBuildEvent>
       <Message>Copy DLL to Super Hexagon game folder ... </Message>
@@ -117,6 +119,8 @@ copy "E:\Mare5\dev\libs\cpp\libzmq-v141-4_3_2\*.dll" "E:\Games\Super Hexagon\"
     <ClInclude Include="glut_hook.h" />
     <ClInclude Include="memory_tools.h" />
     <ClInclude Include="ProgressBar.h" />
+    <ClInclude Include="Renderer.h" />
+    <ClInclude Include="Shader.h" />
     <ClInclude Include="stdafx.h" />
     <ClInclude Include="SuperHaxagon.h" />
     <ClInclude Include="SuperStruct.h" />
@@ -139,6 +143,7 @@ copy "E:\Mare5\dev\libs\cpp\libzmq-v141-4_3_2\*.dll" "E:\Games\Super Hexagon\"
     </ClCompile>
     <ClCompile Include="glut_hook.cpp" />
     <ClCompile Include="memory_tools.cpp" />
+    <ClCompile Include="Renderer.cpp" />
     <ClCompile Include="stdafx.cpp">
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">Create</PrecompiledHeader>
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">Create</PrecompiledHeader>
@@ -153,6 +158,10 @@ copy "E:\Mare5\dev\libs\cpp\libzmq-v141-4_3_2\*.dll" "E:\Games\Super Hexagon\"
     <ClCompile Include="super_client.cpp" />
     <ClCompile Include="super_deep_ai.cpp" />
     <ClCompile Include="win_console.cpp" />
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="Shaders\quad.fs" />
+    <None Include="Shaders\quad.vs" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">

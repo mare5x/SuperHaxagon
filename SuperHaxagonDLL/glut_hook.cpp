@@ -79,7 +79,8 @@ void glut_hook::init_gl()
 {
 	if (gladLoadGL()) {
 		printf("OpenGL: %d.%d\n", GLVersion.major, GLVersion.minor);
-		glPointSize(4);
+        printf("Shader language: %s\n", glGetString(GL_SHADING_LANGUAGE_VERSION));
+        glPointSize(4);
 		
 		gl_hooked = true;
 	}

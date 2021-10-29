@@ -5,6 +5,7 @@
 #include "memory_tools.h"
 #include "win_console.h"
 #include "super_deep_ai.h"
+#include "Renderer.h"
 #include "BitmapPlusPlus.hpp"
 
 
@@ -82,6 +83,8 @@ std::array<BYTE, 5> orig_render_bytes;
 
 int moving_direction = 0;   // 1 (counter clockwise), 0 (not moving), -1 (clockwise)
 
+Renderer renderer;
+
 // Function declarations in this file.
 LRESULT CALLBACK input_handler(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam);
 
@@ -151,6 +154,10 @@ void __stdcall hooked_render()
 
 	if (setting_rotation_type != -1)
 		super.set_world_rotation_type(static_cast<ROTATION_OPTIONS>(setting_rotation_type));
+
+    if (renderer.shader.ID == -1) {
+        renderer.init(); 
+    }
 }
 
 
@@ -208,7 +215,9 @@ void draw_debug()
 
 void SuperHaxagon::draw()
 {	
-	update();
+   	update();
+
+    renderer.render();  // Render shader stuff
 
 	if (fmodex::is_hooked() && setting_debug_lines) {
 		// Draw a pulsing sphere based on the audio data.
