@@ -126,8 +126,10 @@ LRESULT CALLBACK input_handler(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lPara
     }
 
 	// Allow window resizing:
-	if (uMsg == WM_SIZING)
+    if (uMsg == WM_SIZING) {
 		window_rect = *(RECT*)lParam;
+        renderer.on_resize(window_rect.right - window_rect.left + 1, window_rect.bottom - window_rect.top + 1);
+    }
 	if (uMsg == WM_EXITSIZEMOVE)
 		glutReshapeWindow(window_rect.right - window_rect.left + 1, window_rect.bottom - window_rect.top + 1);
 
@@ -156,7 +158,8 @@ void __stdcall hooked_render()
 		super.set_world_rotation_type(static_cast<ROTATION_OPTIONS>(setting_rotation_type));
 
     if (renderer.shader.ID == -1) {
-        renderer.init(); 
+        renderer.init();
+        renderer.on_resize(window_rect.right - window_rect.left + 1, window_rect.bottom - window_rect.top + 1);
     }
 }
 

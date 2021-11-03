@@ -11,8 +11,11 @@ public:
 
 	void render();
 
-	void on_resize(int w, int h) { }
+    void on_resize(int w, int h);
 
-	GLuint vao, vbo;
 	Shader shader;
+private:
+	GLuint vao, vbo;
+    GLuint texture;
+    int w, h;
 };
