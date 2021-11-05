@@ -11,7 +11,10 @@ Renderer::~Renderer()
 	glDeleteBuffers(1, &vbo);
 	glDeleteVertexArrays(1, &vao);
     glDeleteTextures(1, &texture);
-    if (shader.ID != -1) glDeleteProgram(shader.ID);
+    if (shader.ID != -1) {
+        glDeleteProgram(shader.ID);
+        glUseProgram(0);
+    }
 }
 
 void Renderer::init()
@@ -52,7 +55,7 @@ void Renderer::init()
     int old;
     glGetIntegerv(GL_CURRENT_PROGRAM, &old);
     shader.use();
-    shader.setInt("tex", 0);
+    shader.setInt("tex", 0);  // Bind to GL_TEXTURE0
     glUseProgram(old);
 }
 

@@ -41,7 +41,15 @@ namespace fmodex {
 
 
 enum MENU_OPTION : int {
-	DEBUG_LINES, AUTOPLAY, AUTOPLAY_NATURAL, AUTOPLAY_INSTANT, AUTOPLAY_DQN, AI_LEARNING, CONSOLE, ZOOM
+	DEBUG_LINES, 
+    AUTOPLAY, 
+    AUTOPLAY_NATURAL, 
+    AUTOPLAY_INSTANT, 
+    AUTOPLAY_DQN, 
+    AI_LEARNING, 
+    CONSOLE, 
+    ZOOM,
+    SPECIAL_EFFECTS
 };
 
 typedef SuperStruct::WORLD_ROTATION_OPTIONS ROTATION_OPTIONS;
@@ -67,6 +75,7 @@ int setting_rotation_type = -1;
 int setting_wall_speed = -1;
 bool setting_auto_restart = false;  // automatically restart the game when dead
 bool setting_ai_learning = false;
+bool setting_special_effects = false;
 
 HMODULE g_dll;
 HWND g_hwnd;
@@ -83,7 +92,7 @@ std::array<BYTE, 5> orig_render_bytes;
 
 int moving_direction = 0;   // 1 (counter clockwise), 0 (not moving), -1 (clockwise)
 
-Renderer renderer;
+Renderer sfx_shader;
 
 // Function declarations in this file.
 LRESULT CALLBACK input_handler(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam);
@@ -128,7 +137,7 @@ LRESULT CALLBACK input_handler(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lPara
 	// Allow window resizing:
     if (uMsg == WM_SIZING) {
 		window_rect = *(RECT*)lParam;
-        renderer.on_resize(window_rect.right - window_rect.left + 1, window_rect.bottom - window_rect.top + 1);
+        sfx_shader.on_resize(window_rect.right - window_rect.left + 1, window_rect.bottom - window_rect.top + 1);
     }
 	if (uMsg == WM_EXITSIZEMOVE)
 		glutReshapeWindow(window_rect.right - window_rect.left + 1, window_rect.bottom - window_rect.top + 1);
@@ -157,9 +166,9 @@ void __stdcall hooked_render()
 	if (setting_rotation_type != -1)
 		super.set_world_rotation_type(static_cast<ROTATION_OPTIONS>(setting_rotation_type));
 
-    if (renderer.shader.ID == -1) {
-        renderer.init();
-        renderer.on_resize(window_rect.right - window_rect.left + 1, window_rect.bottom - window_rect.top + 1);
+    if (sfx_shader.shader.ID == -1) {
+        sfx_shader.init();
+        sfx_shader.on_resize(window_rect.right - window_rect.left + 1, window_rect.bottom - window_rect.top + 1);
     }
 }
 
@@ -220,7 +229,9 @@ void SuperHaxagon::draw()
 {	
    	update();
 
-    renderer.render();  // Render shader stuff
+    if (setting_special_effects) {
+        sfx_shader.render();  // Render shader stuff before others
+    }
 
 	if (fmodex::is_hooked() && setting_debug_lines) {
 		// Draw a pulsing sphere based on the audio data.
@@ -381,6 +392,9 @@ void glut_menu_func(int value)
 	case MENU_OPTION::ZOOM:
 		setting_zoom = !setting_zoom;
 		break;
+    case MENU_OPTION::SPECIAL_EFFECTS:
+        setting_special_effects = !setting_special_effects;
+        break;
 	default:
 		break;
 	}
@@ -470,6 +484,7 @@ void hook_glut(const char* title)
 
 	glutCreateMenu(&glut_menu_func);
 	glutAddSubMenu("Autoplay settings", autoplay_menu);
+    glutAddMenuEntry("Render special effects", MENU_OPTION::SPECIAL_EFFECTS);
 	glutAddMenuEntry("Show/hide debug lines", MENU_OPTION::DEBUG_LINES);
 	glutAddMenuEntry("Open/close debug console", MENU_OPTION::CONSOLE);
 	glutAddMenuEntry("Enable/disable zoom out", MENU_OPTION::ZOOM);
@@ -531,6 +546,8 @@ void draw_debug_strings()
     snprintf(text, sizeof(text), "AI control: %d", setting_autoplay);
     draw_text(text, w - 128, h - y * line--);
     snprintf(text, sizeof(text), "AI type: %d", setting_autoplay_type);
+    draw_text(text, w - 128, h - y * line--);
+    snprintf(text, sizeof(text), "SFX: %d", setting_special_effects);
     draw_text(text, w - 128, h - y * line--);
 }
 
