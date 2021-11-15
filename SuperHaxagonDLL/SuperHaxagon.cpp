@@ -4,7 +4,7 @@
 #include "super_ai.h"
 #include "memory_tools.h"
 #include "win_console.h"
-#include "super_deep_ai.h"
+#include "super_ai.h"
 #include "Renderer.h"
 #include "BitmapPlusPlus.hpp"
 
@@ -43,8 +43,9 @@ namespace fmodex {
 enum MENU_OPTION : int {
 	DEBUG_LINES, 
     AUTOPLAY, 
-    AUTOPLAY_NATURAL, 
     AUTOPLAY_INSTANT, 
+    AUTOPLAY_HEURISTIC, 
+    AUTOPLAY_DAGGER,
     AUTOPLAY_DQN, 
     AI_LEARNING, 
     CONSOLE, 
@@ -67,7 +68,7 @@ int mouse_x, mouse_y;
 bool console_change_requested = false;
 
 bool setting_autoplay = true;
-int setting_autoplay_type = MENU_OPTION::AUTOPLAY_NATURAL;
+int setting_autoplay_type = MENU_OPTION::AUTOPLAY_HEURISTIC;
 bool setting_debug_lines = true;
 bool setting_console = true;
 bool setting_zoom = false;
@@ -75,7 +76,7 @@ int setting_rotation_type = -1;
 int setting_wall_speed = -1;
 bool setting_auto_restart = false;  // automatically restart the game when dead
 bool setting_ai_learning = false;
-bool setting_special_effects = false;
+bool setting_special_effects = true;
 
 HMODULE g_dll;
 HWND g_hwnd;
@@ -279,8 +280,8 @@ void SuperHaxagon::update()
 	if (!super.is_in_game()) {
 		// Careful! This doesn't necessarily mean the agent died!
 		if (in_game) {
-			if (setting_autoplay_type == AUTOPLAY_DQN && setting_ai_learning)
-				dqn_ai::report_death(&super);
+			if (setting_autoplay_type == AUTOPLAY_DAGGER && setting_ai_learning)
+				super_ai::report_death(&super);
 			in_game = false;
 			
 			if (setting_auto_restart || setting_ai_learning) {
@@ -301,15 +302,15 @@ void SuperHaxagon::update()
 	if (!setting_autoplay) return;
 
 	switch (setting_autoplay_type) {
-	case AUTOPLAY_NATURAL:
-		start_moving(get_move_dir(&super));
+	case AUTOPLAY_HEURISTIC:
+		start_moving(super_ai::get_move_heuristic(&super));
 		break;
 	case AUTOPLAY_INSTANT:
 		stop_moving();
-		autoplay_instant(&super);
+		super_ai::make_move_instant(&super);
 		break;
-	case AUTOPLAY_DQN:
-		start_moving(dqn_ai::get_move_dir(&super, setting_ai_learning));
+	case AUTOPLAY_DAGGER:
+		start_moving(super_ai::get_move_dagger(&super, setting_ai_learning));
 		break;
 	}
 
@@ -353,13 +354,13 @@ void SuperHaxagon::hook(HMODULE dll)
 
 	fmodex::init(g_proc_adr);
 
-	dqn_ai::init();
+	super_ai::init();
 }
 
 
 void WINAPI SuperHaxagon::unhook()
 {
-	dqn_ai::exit();
+	super_ai::exit();
 
 	stop_moving();
 	
@@ -422,16 +423,16 @@ void glut_autoplay_menu_func(int option)
 	case MENU_OPTION::AI_LEARNING:
 		setting_ai_learning = !setting_ai_learning;
 		break;
-	case MENU_OPTION::AUTOPLAY_NATURAL:
-		setting_autoplay_type = AUTOPLAY_NATURAL;
+	case MENU_OPTION::AUTOPLAY_HEURISTIC:
+		setting_autoplay_type = AUTOPLAY_HEURISTIC;
 		setting_autoplay = true;
 		break;
 	case MENU_OPTION::AUTOPLAY_INSTANT:
 		setting_autoplay_type = AUTOPLAY_INSTANT;
 		setting_autoplay = true;
 		break;
-	case MENU_OPTION::AUTOPLAY_DQN:
-		setting_autoplay_type = AUTOPLAY_DQN;
+	case MENU_OPTION::AUTOPLAY_DAGGER:
+		setting_autoplay_type = AUTOPLAY_DAGGER;
 		setting_autoplay = true;
 		break;
 	default:
@@ -476,11 +477,11 @@ void hook_glut(const char* title)
 	glutAddMenuEntry("VERY FAST", 50);
 
 	int autoplay_menu = glutCreateMenu(&glut_autoplay_menu_func);
-	glutAddMenuEntry("Enable/disable autoplay", MENU_OPTION::AUTOPLAY);
-	glutAddMenuEntry("Enable/disable dqn learning", MENU_OPTION::AI_LEARNING);
-	glutAddMenuEntry("Natural movements", MENU_OPTION::AUTOPLAY_NATURAL);
+	glutAddMenuEntry("Toggle autoplay", MENU_OPTION::AUTOPLAY);
+	glutAddMenuEntry("Toggle AI learning", MENU_OPTION::AI_LEARNING);
+	glutAddMenuEntry("Natural movements", MENU_OPTION::AUTOPLAY_HEURISTIC);
 	glutAddMenuEntry("Instant movements", MENU_OPTION::AUTOPLAY_INSTANT);
-	glutAddMenuEntry("Deep Reinforcement Learning", MENU_OPTION::AUTOPLAY_DQN);
+	glutAddMenuEntry("DAGGER", MENU_OPTION::AUTOPLAY_DAGGER);
 
 	glutCreateMenu(&glut_menu_func);
 	glutAddSubMenu("Autoplay settings", autoplay_menu);

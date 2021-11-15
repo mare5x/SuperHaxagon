@@ -1,13 +1,14 @@
 #include "stdafx.h"
 #include "super_client.h"
-#include "super_deep_ai.h"
+#include "super_ai.h"
 
 
 namespace {
     enum MSG_TYPE {
-        STATE_ACTION,
-        STATE_EXPERT_ACTION,
-        EPISODE_SCORE
+        DAGGER_STATE_ACTION = 3,
+        DAGGER_STATE_EXPERT_ACTION = 4,
+        EPISODE_SCORE = 5,
+        DQN_STATE_ACTION = 6
     };
 }
 
@@ -23,12 +24,12 @@ namespace super_client {
         socket.connect("tcp://localhost:5555");
     }
 
-    int SuperClient::request_action(const dqn_ai::GameState & state)
+    int SuperClient::request_action(const super_ai::GameState_DAGGER & state)
     {
         struct StateAction_t {
             int32_t type;
-            dqn_ai::GameState state;
-        } msg{ STATE_ACTION, state };
+            super_ai::GameState_DAGGER state;
+        } msg{ DAGGER_STATE_ACTION, state };
 
         printf("REQ: request action\n");
         int reply = request(&msg, sizeof(StateAction_t));
@@ -36,16 +37,29 @@ namespace super_client {
         return reply;
     }
 
-    int SuperClient::request_action(const dqn_ai::GameState & state, const int action)
+    int SuperClient::request_action(const super_ai::GameState_DAGGER & state, const int action)
     {
         struct StateActionPair_t {
             int32_t type;
             int32_t action;
-            dqn_ai::GameState state;
-        } msg{ STATE_EXPERT_ACTION, action, state };
+            super_ai::GameState_DAGGER state;
+        } msg{ DAGGER_STATE_EXPERT_ACTION, action, state };
 
         printf("REQ: request action w/ demonstrator\n");
         int reply = request(&msg, sizeof(StateActionPair_t));
+        printf("REP: %d\n", reply);
+        return reply;
+    }
+
+    int SuperClient::request_action(const super_ai::GameState_DQN & state)
+    {
+        struct StateAction_t {
+            int32_t type;
+            super_ai::GameState_DQN state;
+        } msg{ DQN_STATE_ACTION, state };
+
+        printf("REQ: request action\n");
+        int reply = request(&msg, sizeof(StateAction_t));
         printf("REP: %d\n", reply);
         return reply;
     }

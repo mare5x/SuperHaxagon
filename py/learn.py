@@ -24,7 +24,7 @@ def plot_loop(q):
             data.extend(item)
             ax.cla()
             ax.plot(data)
-            ax.plot(np.convolve(np.array(data), np.ones(10) / 10, mode='same'))
+            ax.plot(np.convolve(np.array(data), np.ones(10) / 10, mode='same'))  # Rolling average
         except Empty:
             pass
     

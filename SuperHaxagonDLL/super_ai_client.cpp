@@ -1,14 +1,12 @@
 #include "stdafx.h"
 #include <cmath>
-#include <vector>
-#include <array>
 #include "SuperStruct.h"
-#include "super_deep_ai.h"
 #include "super_ai.h"
 #include "super_client.h"
 
 
-using dqn_ai::GameState;
+using super_ai::GameState_DAGGER;
+using super_ai::GameState_DQN;
 
 namespace {
 	// IDEA OUTLINE (behavioral cloning):
@@ -53,7 +51,7 @@ void _print_arr(const int* arr, int size)
 	printf("\n");
 }
 
-void _print_state(const GameState& state)
+void _print_state(const GameState_DAGGER& state)
 {
 	for (int i = 0; i < 6; ++i)
 		_print_arr(state.walls[i], 2);
@@ -104,7 +102,7 @@ void process_walls(SuperStruct* super, float walls[6][2])
 	}
 }
 
-void get_game_state(SuperStruct* super, GameState* game_state) 
+void get_game_state_dagger(SuperStruct* super, GameState_DAGGER* game_state) 
 {
 	process_walls(super, game_state->walls);
 	game_state->player_pos = super->get_player_rotation() / 360.0f;
@@ -112,36 +110,54 @@ void get_game_state(SuperStruct* super, GameState* game_state)
 	game_state->wall_speed = super->get_wall_speed_percent();
 }
 
-void dqn_ai::init(bool load)
+void get_game_state_dqn(SuperStruct* super, GameState_DQN* game_state)
+{
+    process_walls(super, game_state->walls);
+    game_state->wall_speed = super->get_wall_speed_percent();
+    
+    int n_slots = super->get_slots();
+    game_state->n_slots[0] = n_slots == 4;
+    game_state->n_slots[1] = n_slots == 5;
+    game_state->n_slots[2] = n_slots == 6;
+
+    int player_slot = super->get_player_slot();
+    for (int i = 0; i < 6; ++i) {
+        game_state->cur_slot[i] = player_slot == i;
+    }
+
+    game_state->player_pos = super->get_player_rotation() / 360.0f;
+}
+
+void super_ai::init()
 {
     client.init();
 }
 
-void dqn_ai::exit(bool save) 
+void super_ai::exit() 
 {
     client.close();
     super_client::close();
 }
 
-void dqn_ai::report_death(SuperStruct* super)
+void super_ai::report_death(SuperStruct* super)
 {
     client.send_episode_score(frame_counter);
 	frame_counter = 0;
 }
 
-int dqn_ai::get_move_dir(SuperStruct* super, bool learning)
+int super_ai::get_move_dagger(SuperStruct* super, bool learning)
 {
 	if (!super->is_in_game())
 		return 0;
 
 	++frame_counter;
 
-	GameState game_state = {};
-	get_game_state(super, &game_state);
+	GameState_DAGGER game_state = {};
+	get_game_state_dagger(super, &game_state);
 
     int action = 0;
 	if (learning) {
-		int expert_action = get_move_dir(super);
+		int expert_action = get_move_heuristic(super);
         action = client.request_action(game_state, expert_action);
     }
     else {

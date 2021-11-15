@@ -70,7 +70,7 @@ int evaluate_move(int start_slot, int end_slot, int dir)
 }
 
 
-int get_move_dir(SuperStruct* super)
+int super_ai::get_move_heuristic(SuperStruct* super)
 {
 	if (!super->is_in_game())
 		return 0;
@@ -152,7 +152,7 @@ int get_move_dir(SuperStruct* super)
 	return best_dir;
 }
 
-void autoplay_instant(SuperStruct * super)
+void super_ai::make_move_instant(SuperStruct * super)
 {
 	if (!super->is_in_game())
 		return;
