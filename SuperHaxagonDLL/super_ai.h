@@ -1,4 +1,5 @@
 #pragma once
+#include "super_client.h"
 
 struct SuperStruct;
 
@@ -38,6 +39,8 @@ namespace super_ai {
     // Call this when training the agent and it dies.
     void report_death(SuperStruct* super);
 
+    // Client for communicating with the Python process.
+    extern super_client::SuperClient* client;
 
     void init();
     void exit();

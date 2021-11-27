@@ -8,7 +8,7 @@
 using super_ai::GameState_DAGGER;
 using super_ai::GameState_DQN;
 
-namespace {
+namespace super_ai {
 	// IDEA OUTLINE (behavioral cloning):
 	// Over the course of some time, sample training data to be used for training.
 	// Sample an equal amount of samples for each possible action taken by the ai
@@ -31,7 +31,7 @@ namespace {
     // left or right (or nowhere) based on the input in the output neurons.
     // All inputs and outputs in the ANN are normalized [0, 1].
 
-    super_client::SuperClient client(super_client::g_context);
+    super_client::SuperClient* client;
 
 	unsigned long frame_counter = 0;
 }
@@ -130,18 +130,20 @@ void get_game_state_dqn(SuperStruct* super, GameState_DQN* game_state)
 
 void super_ai::init()
 {
-    client.init();
+    client = new super_client::SuperClient(super_client::g_context);
+    client->init();
 }
 
 void super_ai::exit() 
 {
-    client.close();
+    client->close();
+    delete client;
     super_client::close();
 }
 
 void super_ai::report_death(SuperStruct* super)
 {
-    client.send_episode_score(frame_counter);
+    client->send_episode_score(frame_counter);
 	frame_counter = 0;
 }
 
@@ -158,11 +160,25 @@ int super_ai::get_move_dagger(SuperStruct* super, bool learning)
     int action = 0;
 	if (learning) {
 		int expert_action = get_move_heuristic(super);
-        action = client.request_action(game_state, expert_action);
+        action = client->request_action(game_state, expert_action);
     }
     else {
-        action = client.request_action(game_state);
+        action = client->request_action(game_state);
     }
 
 	return action;
+}
+
+int super_ai::get_move_dqn(SuperStruct * super, bool learning)
+{
+    if (!super->is_in_game())
+        return 0;
+
+    ++frame_counter;
+
+    GameState_DQN game_state = {};
+    get_game_state_dqn(super, &game_state);
+
+    int action = client->request_action(game_state);
+    return action;
 }

@@ -38,7 +38,7 @@ def start_plotting():
 
 
 class DAGGER:
-    """Imitation learning: DAGGER algorithm"""
+    """Imitation learning: DAGGER algorithm using Random Forests for action classification."""
     
     MODEL_FPATH = "dagger.model"
 

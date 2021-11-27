@@ -8,8 +8,8 @@ namespace {
 	int slots;
 	int world_direction;  // world spinning rotation direction 
 	int hedge;
-	int near[6];
-	int far[6];
+	int near_dst[6];
+	int far_dst[6];
 }
 
 
@@ -31,42 +31,42 @@ int evaluate_move(int start_slot, int end_slot, int dir)
 	const int step_penalty = world_direction == dir ? 28 : 36; 
 	
 	int cur_slot = start_slot;
-	int start_dist = far[cur_slot];
+	int start_dist = far_dst[cur_slot];
 	int step_counter = 0;
 	// Penalty values were found by trial and error. Mostly magic.
 	int penalty = 0;
 
-	//if (cur_slot == end_slot && far[cur_slot] - near[cur_slot] < hedge) {
-	//	penalty += pow(near[cur_slot] + hedge - far[cur_slot], 1.5);
+	//if (cur_slot == end_slot && far_dst[cur_slot] - near_dst[cur_slot] < hedge) {
+	//	penalty += pow(near_dst[cur_slot] + hedge - far_dst[cur_slot], 1.5);
 	//}
 
 	while (cur_slot != end_slot) {
 		int next_slot = get_next_slot(cur_slot, dir);
 
 		// An obstruction on the next slot.
-		//if (near[next_slot] > near[cur_slot]) {
-		//	penalty += (near[next_slot] - near[cur_slot]) * 4;
+		//if (near_dst[next_slot] > near_dst[cur_slot]) {
+		//	penalty += (near_dst[next_slot] - near_dst[cur_slot]) * 4;
 		//}
 
 		// The next slot is unreachable due to an obstruction.
-		if (near[next_slot] > far[cur_slot]) {
-			penalty += pow(near[next_slot] - far[cur_slot], 1.5);
+		if (near_dst[next_slot] > far_dst[cur_slot]) {
+			penalty += pow(near_dst[next_slot] - far_dst[cur_slot], 1.5);
 		}
 
 		// The amount of empty space between the current slot and the next slot is too little,
 		// so we most likely can't fit through.
-		if (near[cur_slot] > far[next_slot] - hedge) { // || abs(far[cur_slot] - near[next_slot]) < 420) {
+		if (near_dst[cur_slot] > far_dst[next_slot] - hedge) { // || abs(far_dst[cur_slot] - near_dst[next_slot]) < 420) {
 			// The exponent value is very important in controlling whether the 
 			// player should move through this slot or if it's better to maybe 
 			// stay put and wait for the wall to disappear ...
-			penalty += pow(near[cur_slot] + hedge - far[next_slot], 1.42); // *pow(0.85, step_counter++);
+			penalty += pow(near_dst[cur_slot] + hedge - far_dst[next_slot], 1.42); // *pow(0.85, step_counter++);
 		}
 
 		penalty += step_penalty;
 
 		cur_slot = next_slot;
 	}
-	return far[end_slot] - start_dist - penalty;
+	return far_dst[end_slot] - start_dist - penalty;
 }
 
 
@@ -81,24 +81,24 @@ int super_ai::get_move_heuristic(SuperStruct* super)
 	hedge = super->get_wall_speed_percent() * 420.0f + 42;
 
 	for (int i = 0; i < 6; ++i)
-		near[i] = min_dist;
+		near_dst[i] = min_dist;
 	for (int i = 0; i < 6; ++i)
-		far[i] = 5432;  // this value mustn't be too large otherwise it can cloud the judgement of moves
+		far_dst[i] = 5432;  // this value mustn't be too large otherwise it can cloud the judgement of moves
 
-	// Fill the near and far arrays.
-	// near[i] is the end distance of the closest wall on slot i (and less than a certain threshold value).
-	// far[i] is the start distance of the closest wall on slot i that is further than a certain threshold value.
+	// Fill the near_dst and far arrays.
+	// near_dst[i] is the end distance of the closest wall on slot i (and less than a certain threshold value).
+	// far_dst[i] is the start distance of the closest wall on slot i that is further than a certain threshold value.
 	for (int i = 0; i < super->walls.size(); ++i) {
 		SuperStruct::Wall& wall = super->walls[i];
 		
 		int slot = wall.slot;
-		int near_dist = wall.distance;
+		int near_dst_dist = wall.distance;
 		int far_dist = wall.distance + wall.width;
 
-		if (near_dist <= near[slot] && far_dist > near[slot])
-			near[slot] = far_dist;
-		if (near_dist < far[slot] && near_dist > 142)
-			far[slot] = near_dist;
+		if (near_dst_dist <= near_dst[slot] && far_dist > near_dst[slot])
+			near_dst[slot] = far_dist;
+		if (near_dst_dist < far_dst[slot] && near_dst_dist > 142)
+			far_dst[slot] = near_dst_dist;
 	}
 
 	// Find the best slot and direction based on the score evaluation algorithm.
@@ -138,10 +138,10 @@ int super_ai::get_move_heuristic(SuperStruct* super)
 /*
 	printf("---------\n");
 	for (int i = 0; i < 6; ++i)
-		printf("%6d", near[i]);
+		printf("%6d", near_dst[i]);
 	printf("\n");
 	for (int i = 0; i < 6; ++i)
-		printf("%6d", far[i]);
+		printf("%6d", far_dst[i]);
 	printf("\n");
 
 	printf("Current %d to new %d in direction %d based on score %d\n", current_slot, best_slot, best_dir, max_score);

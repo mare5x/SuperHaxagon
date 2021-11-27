@@ -1,9 +1,10 @@
 #pragma once
 #include <zmq.hpp>
-#include "super_ai.h"
 
-struct super_ai::GameState_DAGGER;
-struct super_ai::GameState_DQN;
+namespace super_ai {
+    struct GameState_DAGGER;
+    struct GameState_DQN;
+}
 
 namespace super_client
 {
@@ -24,6 +25,8 @@ namespace super_client
         int request_action(const super_ai::GameState_DQN& state);
 
         int send_episode_score(int score);
+
+        int set_learning_mode(bool mode);
     private:
         int request(void* msg, size_t len);
 

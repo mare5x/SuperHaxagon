@@ -8,7 +8,8 @@ namespace {
         DAGGER_STATE_ACTION = 3,
         DAGGER_STATE_EXPERT_ACTION = 4,
         EPISODE_SCORE = 5,
-        DQN_STATE_ACTION = 6
+        DQN_STATE_ACTION = 6,
+        DQN_LEARNING_MODE = 7
     };
 }
 
@@ -73,6 +74,19 @@ namespace super_client {
 
         printf("REQ: episode score (%d)\n", score);
         int reply = request(&msg, sizeof(EpisodeScore_t));
+        printf("REP: %d\n", reply);
+        return reply;
+    }
+
+    int SuperClient::set_learning_mode(bool mode)
+    {
+        struct Msg_t {
+            int32_t type;
+            int32_t mode;
+        } msg{ DQN_LEARNING_MODE, mode };
+
+        printf("REQ: learning mode (%d)\n", mode);
+        int reply = request(&msg, sizeof(Msg_t));
         printf("REP: %d\n", reply);
         return reply;
     }

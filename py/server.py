@@ -10,6 +10,7 @@ import struct
 import zmq
 
 import learn
+import model 
 
 
 MSG_CODES = {
@@ -21,6 +22,7 @@ MSG_CODES = {
     4: "DAGGER_STATE_EXPERT_ACTION",
     5: "EPISODE_SCORE",
     6: "DQN_STATE_ACTION",
+    7: "DQN_LEARNING_MODE"
 }
 
 
@@ -31,6 +33,7 @@ class SuperServer:
         self.socket.bind("tcp://*:5555")
 
         self.dagger = DAGGERServer()
+        self.dqn = DQNServer()
 
         self.current_server = None
 
@@ -42,7 +45,7 @@ class SuperServer:
         if msg_type.startswith("DAGGER"):
             self.current_server = self.dagger 
         elif msg_type.startswith("DQN"):
-            pass # self.current_server = self.dqn
+            self.current_server = self.dqn
 
         if self.current_server is not None:
             reply = self.current_server.process_msg(msg)
@@ -82,7 +85,7 @@ class DAGGERServer:
 
 class DQNServer:
     def __init__(self):
-        pass 
+        self.model = model.SupaDQN()
 
     def process_msg(self, msg):
         GameState_unpack = f"{6*2 + 1 + 3 + 6 + 1}f"
@@ -95,6 +98,9 @@ class DQNServer:
         elif msg_type == "EPISODE_SCORE":
             _, score = struct.unpack("ii", msg)
             self.model.on_episode_end(score)
+        elif msg_type == "DQN_LEARNING_MODE":
+            _, mode = struct.unpack("ii", msg)
+            self.model.set_is_learning(mode == 1)
         return reply
 
 

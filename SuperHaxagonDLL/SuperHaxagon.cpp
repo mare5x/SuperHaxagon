@@ -280,7 +280,7 @@ void SuperHaxagon::update()
 	if (!super.is_in_game()) {
 		// Careful! This doesn't necessarily mean the agent died!
 		if (in_game) {
-			if (setting_autoplay_type == AUTOPLAY_DAGGER && setting_ai_learning)
+			if ((setting_autoplay_type == AUTOPLAY_DAGGER || setting_autoplay_type == AUTOPLAY_DQN) && setting_ai_learning)
 				super_ai::report_death(&super);
 			in_game = false;
 			
@@ -312,6 +312,9 @@ void SuperHaxagon::update()
 	case AUTOPLAY_DAGGER:
 		start_moving(super_ai::get_move_dagger(&super, setting_ai_learning));
 		break;
+    case AUTOPLAY_DQN:
+        start_moving(super_ai::get_move_dqn(&super, setting_ai_learning));
+        break;
 	}
 
 	if (console_change_requested) {
@@ -422,6 +425,7 @@ void glut_autoplay_menu_func(int option)
 		break;
 	case MENU_OPTION::AI_LEARNING:
 		setting_ai_learning = !setting_ai_learning;
+        super_ai::client->set_learning_mode(setting_ai_learning);
 		break;
 	case MENU_OPTION::AUTOPLAY_HEURISTIC:
 		setting_autoplay_type = AUTOPLAY_HEURISTIC;
@@ -435,6 +439,9 @@ void glut_autoplay_menu_func(int option)
 		setting_autoplay_type = AUTOPLAY_DAGGER;
 		setting_autoplay = true;
 		break;
+    case MENU_OPTION::AUTOPLAY_DQN:
+        setting_autoplay_type = AUTOPLAY_DQN;
+        setting_autoplay = true;
 	default:
 		break;
 	}
@@ -482,6 +489,7 @@ void hook_glut(const char* title)
 	glutAddMenuEntry("Natural movements", MENU_OPTION::AUTOPLAY_HEURISTIC);
 	glutAddMenuEntry("Instant movements", MENU_OPTION::AUTOPLAY_INSTANT);
 	glutAddMenuEntry("DAGGER", MENU_OPTION::AUTOPLAY_DAGGER);
+    glutAddMenuEntry("DQN", MENU_OPTION::AUTOPLAY_DQN);
 
 	glutCreateMenu(&glut_menu_func);
 	glutAddSubMenu("Autoplay settings", autoplay_menu);
