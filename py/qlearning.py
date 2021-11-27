@@ -4,6 +4,15 @@ import math
 
 import torch
 import torch.nn as nn
+import numpy as np
+
+from plot import plot_queue
+
+
+def plot(ax, data):
+    ax.set_title("Q-learning score history (frames)")
+    ax.plot(data)
+    ax.plot(np.convolve(np.array(data), np.ones(10) / 10, mode='same'))  # Rolling average self.model.score_history)
 
 
 INPUT_SIZE = 6*2 + 1 + 3 + 6 + 1
@@ -46,9 +55,13 @@ class SupaDQN:
     def __init__(self):
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
-        self.policy_net = SupaNet()
-        self.policy_net.to(self.device)
+        # Double Q-learning uses two networks.
+        # target_net is a periodic copy of policy_net.
+        self.policy_net = SupaNet().to(self.device)
+        self.target_net = SupaNet().to(self.device)
+        self.target_net.load_state_dict(self.policy_net.state_dict())
         self.policy_net.train()
+        self.target_net.eval()
 
         self.optimizer = torch.optim.SGD(self.policy_net.parameters(), lr=0.0003)
         self.criterion = torch.nn.SmoothL1Loss()  # TODO: Try huber, mse, l1, ...
@@ -61,6 +74,7 @@ class SupaDQN:
         self.eps_start = 0.9  # Exploration rate
         self.eps_end = 0.05
         self.eps_decay = 10000
+        self.target_update = 8192  # Update target_net to policy_net every this many steps/frames.
 
         self.gamma = 0.999
 
@@ -68,6 +82,7 @@ class SupaDQN:
         self.batch_size = 128
 
         self.is_learning = False 
+        self.score_history = []
 
         # The model works with indices [0, 3), but the server expects [-1,0,1].
         self.actions_tr = [-1, 0, 1]  # Map action index to action
@@ -106,7 +121,7 @@ class SupaDQN:
         next_state_Vs = torch.zeros(self.batch_size, 1).to(self.device)
         with torch.no_grad():
             # detach because this happens on the 'target' net, not the online net
-            next_state_Vs[non_final_mask] = self.policy_net(non_final_next_states).detach().max(1)[0].view(-1, 1)
+            next_state_Vs[non_final_mask] = self.target_net(non_final_next_states).detach().max(1)[0].view(-1, 1)
         target_Qs = (next_state_Vs * self.gamma) + rewards 
 
         loss = self.criterion(model_Qs, target_Qs)
@@ -117,6 +132,8 @@ class SupaDQN:
 
     def step(self, next_state, reward, done=False):
         self.steps_taken += 1
+        if self.steps_taken % self.target_update == 0:
+            self.target_net.load_state_dict(self.policy_net.state_dict())
 
         if self.state is None:  # First frame
             self.state = next_state
@@ -144,8 +161,11 @@ class SupaDQN:
     def on_episode_end(self, score=None):
         action = self.actions_tr_inv[0]
         if self.is_learning:
+            self.score_history.append(score)
             reward = -1.0
             action = self.step(None, reward, done=True)
+            plot_queue.put((plot, self.score_history))
+
         self.reset()
         return self.actions_tr[action]
 

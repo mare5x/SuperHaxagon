@@ -56,7 +56,7 @@ class SuperServer:
 class DAGGERServer:
     def __init__(self):
         self.model = dagger.DAGGER.load()
-        plot.plot_queue.put((dagger.plot, self.model.score_history))
+        # plot.plot_queue.put((dagger.plot, self.model.score_history))
 
     def process_msg(self, msg):
         # print(f"Received {msg}")

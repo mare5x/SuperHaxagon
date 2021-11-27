@@ -11,6 +11,7 @@ from plot import plot_queue
 
 
 def plot(ax, data):
+    ax.set_title("DAGGER score history (frames)")
     ax.plot(data)
     ax.plot(np.convolve(np.array(data), np.ones(10) / 10, mode='same'))  # Rolling average self.model.score_history)
 
