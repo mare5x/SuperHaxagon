@@ -1,5 +1,6 @@
 #pragma once
 #include "VariableArray.h"
+#include <array>
 
 typedef unsigned long DWORD;
 
@@ -30,10 +31,13 @@ struct SuperStruct {
 
 	SuperStruct() : base_adr(get_base_address()), walls(64) { }
 
-	void update() { update_walls(); }
+    void update();
 
 	bool is_fullscreen() const;
+
 	bool is_in_game() const { return read_offset<bool>(IN_GAME); }
+    // Heuristically determined (dead when the clock stops ticking).
+    bool is_player_alive() const;
 
 	int get_mouse_x() const { return read_offset<int>(MOUSE_X); }
 	int get_mouse_y() const { return read_offset<int>(MOUSE_Y); }
@@ -42,6 +46,7 @@ struct SuperStruct {
 	int get_polygon_radius() const { return read_offset<int>(POLYGON_RADIUS); }
 	int get_slots() const { return read_offset<int>(POLYGON_SIDES); }
 
+    // Units: 1/60th of a second
 	int get_elapsed_time() const { return read_offset<int>(ELAPSED_TIME); }
 	char* get_elapsed_time(char* const dest_string) const;
 
@@ -118,4 +123,6 @@ private:
 	void write_offset(OFFSETS offset, const T val) const;
 
 	void update_walls();
+
+    std::array<int, 3> prev_times;  // Store last N `get_elapsed_time`s, where [0] is the current time.
 };

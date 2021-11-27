@@ -40,7 +40,9 @@ class ReplayMemory:
         self.memory = deque([], maxlen=capacity)
 
     def push(self, *args):
-        self.memory.append(Transition(*args))
+        item = Transition(*args)
+        self.memory.append(item)
+        return item
 
     def sample(self, batch_size):
         return random.sample(self.memory, batch_size)
@@ -144,9 +146,6 @@ class SupaDQN:
         # When done=True, next_state is None
         # Store (s,a,r,s') into replay memory.
         # N.B. all values are Python types (not tensors).
-        if reward < 0: 
-            print(self.state, self.action, reward, next_state)
-            print(self.exploration_rate(self.steps_taken))
         self.memory.push(self.state, self.action, reward, next_state)
 
         self.optimize()
@@ -156,6 +155,8 @@ class SupaDQN:
             self.action = self.pick_action(next_state)
             return self.action
         else:
+            # print(self.state, self.action, reward, next_state)
+            print(self.exploration_rate(self.steps_taken))
             return self.actions_tr_inv[0]
 
     def on_episode_end(self, score=None):
@@ -165,7 +166,6 @@ class SupaDQN:
             reward = -1.0
             action = self.step(None, reward, done=True)
             plot_queue.put((plot, self.score_history))
-
         self.reset()
         return self.actions_tr[action]
 

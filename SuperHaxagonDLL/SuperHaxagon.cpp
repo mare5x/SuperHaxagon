@@ -276,12 +276,17 @@ void SuperHaxagon::update()
 
 	static bool in_game = false;
 	static bool restart_key_pending = false;
+    static char time_string[1024];
 
-	if (!super.is_in_game()) {
+    // Determine when does the player die and trigger auto-restart:
+	if (!super.is_player_alive()) {
 		// Careful! This doesn't necessarily mean the agent died!
 		if (in_game) {
-			if ((setting_autoplay_type == AUTOPLAY_DAGGER || setting_autoplay_type == AUTOPLAY_DQN) && setting_ai_learning)
-				super_ai::report_death(&super);
+            super.get_elapsed_time(time_string);
+            printf("Game over @ %s\n", time_string);
+            if ((setting_autoplay_type == AUTOPLAY_DAGGER || setting_autoplay_type == AUTOPLAY_DQN) && setting_ai_learning) {
+                super_ai::report_death(&super);
+            }
 			in_game = false;
 			
 			if (setting_auto_restart || setting_ai_learning) {
@@ -299,23 +304,23 @@ void SuperHaxagon::update()
         }
     }
 
-	if (!setting_autoplay) return;
-
-	switch (setting_autoplay_type) {
-	case AUTOPLAY_HEURISTIC:
-		start_moving(super_ai::get_move_heuristic(&super));
-		break;
-	case AUTOPLAY_INSTANT:
-		stop_moving();
-		super_ai::make_move_instant(&super);
-		break;
-	case AUTOPLAY_DAGGER:
-		start_moving(super_ai::get_move_dagger(&super, setting_ai_learning));
-		break;
-    case AUTOPLAY_DQN:
-        start_moving(super_ai::get_move_dqn(&super, setting_ai_learning));
-        break;
-	}
+    if (setting_autoplay) {
+	    switch (setting_autoplay_type) {
+	    case AUTOPLAY_HEURISTIC:
+		    start_moving(super_ai::get_move_heuristic(&super));
+		    break;
+	    case AUTOPLAY_INSTANT:
+		    stop_moving();
+		    super_ai::make_move_instant(&super);
+		    break;
+	    case AUTOPLAY_DAGGER:
+		    start_moving(super_ai::get_move_dagger(&super, setting_ai_learning));
+		    break;
+        case AUTOPLAY_DQN:
+            start_moving(super_ai::get_move_dqn(&super, setting_ai_learning));
+            break;
+	    }
+    }
 
 	if (console_change_requested) {
 		setting_console = !setting_console;

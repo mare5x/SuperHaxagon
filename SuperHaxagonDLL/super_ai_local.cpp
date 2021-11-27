@@ -72,7 +72,7 @@ int evaluate_move(int start_slot, int end_slot, int dir)
 
 int super_ai::get_move_heuristic(SuperStruct* super)
 {
-	if (!super->is_in_game())
+	if (!super->is_player_alive())
 		return 0;
 
 	slots = super->get_slots();
@@ -154,7 +154,7 @@ int super_ai::get_move_heuristic(SuperStruct* super)
 
 void super_ai::make_move_instant(SuperStruct * super)
 {
-	if (!super->is_in_game())
+	if (!super->is_player_alive())
 		return;
 
 	// Find the closest walls for each slot. Then move to the slot, whose closest wall is the farthest away.

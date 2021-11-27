@@ -5,7 +5,32 @@
 
 void SuperStruct::Wall::print() const { printf("%d %d %d %d %d\n", slot, distance, width, other, enabled); }
 
+void SuperStruct::update()
+{
+    update_walls();
+
+    // Shift array and store time
+    for (int i = 0; i < prev_times.size() - 1; ++i) {
+        prev_times[i + 1] = prev_times[i];
+    }
+    prev_times[0] = get_elapsed_time();
+}
+
 bool SuperStruct::is_fullscreen() const { return read_memory<bool>(base_adr + 0x24); }
+
+bool SuperStruct::is_player_alive() const
+{
+    // is_in_game is true for a bit of time even after the player dies in-game.
+    if (!is_in_game()) return false;
+
+    // Not in-game if all times are equal (the in-game clock is stopped).
+    for (int i = 0; i < prev_times.size() - 1; ++i) {
+        if (prev_times[i] != prev_times[i + 1]) {
+            return true;
+        }
+    }
+    return false;
+}
 
 char* SuperStruct::get_elapsed_time(char * const dest_string) const
 {

@@ -143,13 +143,14 @@ void super_ai::exit()
 
 void super_ai::report_death(SuperStruct* super)
 {
-    client->send_episode_score(frame_counter);
+    // client->send_episode_score(frame_counter);
+    client->send_episode_score(super->get_elapsed_time()); 
 	frame_counter = 0;
 }
 
 int super_ai::get_move_dagger(SuperStruct* super, bool learning)
 {
-	if (!super->is_in_game())
+	if (!super->is_player_alive())
 		return 0;
 
 	++frame_counter;
@@ -171,7 +172,7 @@ int super_ai::get_move_dagger(SuperStruct* super, bool learning)
 
 int super_ai::get_move_dqn(SuperStruct * super, bool learning)
 {
-    if (!super->is_in_game())
+    if (!super->is_player_alive())
         return 0;
 
     ++frame_counter;

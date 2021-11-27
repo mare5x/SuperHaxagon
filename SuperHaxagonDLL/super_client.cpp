@@ -32,9 +32,9 @@ namespace super_client {
             super_ai::GameState_DAGGER state;
         } msg{ DAGGER_STATE_ACTION, state };
 
-        printf("REQ: request action\n");
+        //printf("REQ: request action\n");
         int reply = request(&msg, sizeof(StateAction_t));
-        printf("REP: %d\n", reply);
+        //printf("REP: %d\n", reply);
         return reply;
     }
 
@@ -46,9 +46,9 @@ namespace super_client {
             super_ai::GameState_DAGGER state;
         } msg{ DAGGER_STATE_EXPERT_ACTION, action, state };
 
-        printf("REQ: request action w/ demonstrator\n");
+        //printf("REQ: request action w/ demonstrator\n");
         int reply = request(&msg, sizeof(StateActionPair_t));
-        printf("REP: %d\n", reply);
+        //printf("REP: %d\n", reply);
         return reply;
     }
 
@@ -59,9 +59,9 @@ namespace super_client {
             super_ai::GameState_DQN state;
         } msg{ DQN_STATE_ACTION, state };
 
-        printf("REQ: request action\n");
+        //printf("REQ: request action\n");
         int reply = request(&msg, sizeof(StateAction_t));
-        printf("REP: %d\n", reply);
+        //printf("REP: %d\n", reply);
         return reply;
     }
 
