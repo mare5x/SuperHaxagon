@@ -1,46 +1,24 @@
 import pathlib
 import random
-from queue import Empty
-from multiprocessing import Process, Queue
 
 import numpy as np
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.exceptions import NotFittedError
-from sklearn.metrics import classification_report, accuracy_score
+from sklearn.metrics import accuracy_score
 import joblib
-import matplotlib.animation
-from matplotlib import pyplot as plt
+
+from plot import plot_queue
 
 
-plot_queue = Queue()  # Plot tasks are put into this queue and taken by the plotting process.
-
-def plot_loop(q):
-    data = []
-    fig, ax = plt.subplots()
-
-    def update(f):
-        try:
-            item = q.get_nowait()
-            data.extend(item)
-            ax.cla()
-            ax.plot(data)
-            ax.plot(np.convolve(np.array(data), np.ones(10) / 10, mode='same'))  # Rolling average
-        except Empty:
-            pass
-    
-    ani = matplotlib.animation.FuncAnimation(fig, update, frames=None)  # Docs: You must store the created Animation in a variable that lives as long as the animation should run. Otherwise, the Animation object will be garbage-collected and the animation stops.
-    plt.show()
-
-def start_plotting():
-    proc = Process(target=plot_loop, args=(plot_queue,), daemon=True)
-    proc.start()
-    print(f"Plotter PID: {proc.pid}")
+def plot(ax, data):
+    ax.plot(data)
+    ax.plot(np.convolve(np.array(data), np.ones(10) / 10, mode='same'))  # Rolling average self.model.score_history)
 
 
 class DAGGER:
     """Imitation learning: DAGGER algorithm using Random Forests for action classification."""
     
-    MODEL_FPATH = "dagger.model"
+    MODEL_FPATH = "dagger.gz"
 
     def __init__(self):
         self.model = RandomForestClassifier()
@@ -61,16 +39,30 @@ class DAGGER:
         
     @classmethod
     def load(cls):
+        inst = cls()
         p = pathlib.Path(cls.MODEL_FPATH)
         if p.exists():
             print(f"Loading {cls} from {cls.MODEL_FPATH} ...")
-            return joblib.load(cls.MODEL_FPATH)
+            data = joblib.load(cls.MODEL_FPATH)
+            for k, v in data.items():
+                setattr(inst, k, v)
+            return inst
         else:
-            return cls()
+            return inst
 
     def write(self):
         print(f"Writing to {self.MODEL_FPATH} ...")
-        joblib.dump(self, self.MODEL_FPATH)
+        data = { 
+            'model': self.model,
+            'X_train': self.X_train,
+            'y_train': self.y_train,
+            'X_test': self.X_test,
+            'y_test': self.y_test,
+            'iteration': self.iteration,
+            'data_in_iteration': self.data_in_iteration,
+            'score_history': self.score_history
+        }
+        joblib.dump(data, self.MODEL_FPATH)
 
     def train_model(self):
         X = np.array(self.X_train)
@@ -117,7 +109,7 @@ class DAGGER:
 
     def on_episode_end(self, score):
         self.score_history.append(score)
-        plot_queue.put([score])
+        plot_queue.put((plot, self.score_history))
 
         if self.data_in_iteration >= self.DATA_PER_ITERATION:
             print(f"Training iteration: {self.iteration}\n\tTrain: {len(self.X_train)} || Test: {len(self.X_test)}")

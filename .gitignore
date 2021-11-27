@@ -12,3 +12,4 @@ validation_data.txt
 *.exe
 *.pyc
 *.model
+*.gz

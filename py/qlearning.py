@@ -50,7 +50,7 @@ class SupaDQN:
         self.policy_net.to(self.device)
         self.policy_net.train()
 
-        self.optimizer = torch.optim.SGD(self.policy_net.parameters(), lr=0.0001)
+        self.optimizer = torch.optim.SGD(self.policy_net.parameters(), lr=0.0003)
         self.criterion = torch.nn.SmoothL1Loss()  # TODO: Try huber, mse, l1, ...
 
         self.state = None

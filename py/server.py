@@ -4,13 +4,13 @@
     and reply with an action (left/right/none).
     Why? Easier model fitting using Python than C++.
 """
-
 import struct
 
-import zmq
+import dagger
+import qlearning 
+import plot
 
-import learn
-import model 
+import zmq
 
 
 MSG_CODES = {
@@ -55,8 +55,8 @@ class SuperServer:
 
 class DAGGERServer:
     def __init__(self):
-        self.model = learn.DAGGER.load()
-        self.start_plotting()
+        self.model = dagger.DAGGER.load()
+        plot.plot_queue.put((dagger.plot, self.model.score_history))
 
     def process_msg(self, msg):
         # print(f"Received {msg}")
@@ -78,14 +78,10 @@ class DAGGERServer:
             self.model.on_episode_end(score)
         return reply
 
-    def start_plotting(self):
-        learn.plot_queue.put(self.model.score_history)
-        learn.start_plotting()
-
 
 class DQNServer:
     def __init__(self):
-        self.model = model.SupaDQN()
+        self.model = qlearning.SupaDQN()
 
     def process_msg(self, msg):
         GameState_unpack = f"{6*2 + 1 + 3 + 6 + 1}f"
@@ -107,5 +103,6 @@ class DQNServer:
 if __name__ == "__main__":
     context = zmq.Context()
     server = SuperServer(context)
+    plot.start_plotting()
     while True:
         server.listen()

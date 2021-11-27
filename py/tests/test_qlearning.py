@@ -1,4 +1,4 @@
-from model import *
+from qlearning import *
 
 def in_range(lo, hi, x):
     return x >= lo and x < hi 
