@@ -18,7 +18,7 @@ def plot_loop(q):
         except Empty:
             pass
     
-    ani = matplotlib.animation.FuncAnimation(fig, update, frames=None)  # Docs: You must store the created Animation in a variable that lives as long as the animation should run. Otherwise, the Animation object will be garbage-collected and the animation stops.
+    ani = matplotlib.animation.FuncAnimation(fig, update, frames=None, interval=200, repeat=False)  # Docs: You must store the created Animation in a variable that lives as long as the animation should run. Otherwise, the Animation object will be garbage-collected and the animation stops.
     plt.show()
 
 def start_plotting():

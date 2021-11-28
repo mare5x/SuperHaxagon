@@ -14,6 +14,14 @@ def plot(ax, data):
     ax.plot(data)
     ax.plot(np.convolve(np.array(data), np.ones(10) / 10, mode='same'))  # Rolling average self.model.score_history)
 
+def plot_state(ax, state):
+    # walls array as structured in the C++ code
+    walls = np.array(state[:12]).reshape(6, 2)
+    ax.set_ylim(0, 1.5)
+    ax.bar(list(range(6)), height=walls[:,1], bottom=walls[:,0], width=1.0, align='edge')
+    ax.bar(list(range(6)), height=state[16:16+6], bottom=0, width=1.0, align='edge', alpha=0.5)  # Current player slot
+    ax.plot(state[-1] * 6.0, 0, 'ro')  # Player position
+
 
 INPUT_SIZE = 6*2 + 1 + 3 + 6 + 1
 OUT_SIZE = 3
@@ -23,9 +31,9 @@ class SupaNet(nn.Module):
         super().__init__()
 
         self.net = nn.Sequential(
-            nn.Linear(INPUT_SIZE, 32),
+            nn.Linear(INPUT_SIZE, 16),
             nn.ReLU(),
-            nn.Linear(32, OUT_SIZE)
+            nn.Linear(16, OUT_SIZE)
         )
 
     def forward(self, state):
@@ -65,8 +73,8 @@ class SupaDQN:
         self.policy_net.train()
         self.target_net.eval()
 
-        self.optimizer = torch.optim.SGD(self.policy_net.parameters(), lr=0.0003)
-        self.criterion = torch.nn.SmoothL1Loss()  # TODO: Try huber, mse, l1, ...
+        self.optimizer = torch.optim.Adam(self.policy_net.parameters())
+        self.criterion = torch.nn.MSELoss()  # TODO: Try huber, mse, l1, ...
 
         self.state = None
         self.action = 0
@@ -76,12 +84,12 @@ class SupaDQN:
         self.eps_start = 0.9  # Exploration rate
         self.eps_end = 0.05
         self.eps_decay = 10000
-        self.target_update = 8192  # Update target_net to policy_net every this many steps/frames.
+        self.target_update = 4096  # Update target_net to policy_net every this many steps/frames.
 
-        self.gamma = 0.999
+        self.gamma = 0.925  # 0.95 success
 
-        self.memory = ReplayMemory(10000)
-        self.batch_size = 128
+        self.memory = ReplayMemory(20000)
+        self.batch_size = 512
 
         self.is_learning = False 
         self.score_history = []
@@ -170,6 +178,8 @@ class SupaDQN:
         return self.actions_tr[action]
 
     def get_action(self, state):
+        # plot_queue.put((plot_state, state))
+
         if self.is_learning:
             reward = 0
             action = self.step(state, reward, done=False)

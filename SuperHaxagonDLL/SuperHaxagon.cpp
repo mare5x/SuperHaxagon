@@ -91,6 +91,10 @@ DWORD render_return_adr;	// where to return in the original function
 DWORD render_call_adr;		// the new CALL address 
 std::array<BYTE, 5> orig_render_bytes;
 
+typedef int(__thiscall *orig_MainLoop)(SuperStruct* p_this);
+DWORD* p_main_loop_vt;  // Pointer to the MainLoop function location in the VM table.
+orig_MainLoop p_orig_main_loop;  // Original MainLoop function address taken from the VM table. 
+
 int moving_direction = 0;   // 1 (counter clockwise), 0 (not moving), -1 (clockwise)
 
 Renderer sfx_shader;
@@ -99,6 +103,7 @@ Renderer sfx_shader;
 LRESULT CALLBACK input_handler(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam);
 
 void __stdcall hooked_render();
+int __fastcall hooked_main_loop(SuperStruct* p_this);
 
 void glut_mouse_move_event(int x, int y);
 void glut_menu_func(int value);
@@ -174,6 +179,24 @@ void __stdcall hooked_render()
 }
 
 
+int __fastcall hooked_main_loop(SuperStruct* p_this) 
+{
+    // The reason this function hook is necessary:
+    // hooking and updating only with the render hook is not sufficient
+    // because the render function is capped at 60 FPS (actually, we could 
+    // just disable VSYNC... oh well) which causes update calls to be 'skipped'
+    // when increasing the game's speed (via speedhack). 
+    
+    // Every time this function is called, super.get_elapsed_time() is increased by exactly 1!
+    // This is important for passing the correct state information to the AI.
+
+    // The function's argument is actually the same as our `super` variable!
+    SuperHaxagon::update();
+
+    return p_orig_main_loop(p_this);
+}
+
+
 void __declspec(naked) render_trampoline()
 {
 	__asm {
@@ -228,8 +251,6 @@ void draw_debug()
 
 void SuperHaxagon::draw()
 {	
-   	update();
-
     if (setting_special_effects) {
         sfx_shader.render();  // Render shader stuff before others
     }
@@ -360,6 +381,13 @@ void SuperHaxagon::hook(HMODULE dll)
 	render_call_adr = g_proc_adr + 0x653d0;
 	render_return_adr = render_adr + 5;
 
+
+    // Hook Super Hexagon's main update loop function using a VMT hook.
+    // Replace the main loop method in the virtual method table with our own.
+    // Remember to store the old function pointer.
+    // Source: https://github.com/rcx/superhexagon-internal
+    p_orig_main_loop = (orig_MainLoop)hook_vtable(super.base_adr, 5, (DWORD)&hooked_main_loop);
+
 	fmodex::init(g_proc_adr);
 
 	super_ai::init();
@@ -375,7 +403,9 @@ void WINAPI SuperHaxagon::unhook()
 	unhook_glut();
 
 	write_code_buffer(render_adr, orig_render_bytes.data(), 5);
-	
+    //*p_main_loop_vt = (DWORD)p_orig_main_loop;
+    hook_vtable(super.base_adr, 5, (DWORD)p_orig_main_loop);
+
 	close_console();
 
 	FreeLibraryAndExitThread(g_dll, 0);
