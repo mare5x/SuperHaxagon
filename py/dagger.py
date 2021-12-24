@@ -7,13 +7,16 @@ from sklearn.exceptions import NotFittedError
 from sklearn.metrics import accuracy_score
 import joblib
 
-from plot import plot_queue
+from plot import plot_queue, moving_average
 
 
 def plot(ax, data):
-    ax.set_title("DAGGER score history (frames)")
-    ax.plot(data)
-    ax.plot(np.convolve(np.array(data), np.ones(10) / 10, mode='same'))  # Rolling average self.model.score_history)
+    ax.set_title("DAGGER score history")
+    x = np.array(data) / 60  # Seconds
+    ax.set_ylabel('Time [s]')
+    ax.set_xlabel('Attempt number')
+    ax.plot(x)
+    ax.plot(moving_average(x, k=10))
 
 
 class DAGGER:

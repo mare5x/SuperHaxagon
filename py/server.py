@@ -25,7 +25,6 @@ MSG_CODES = {
     7: "DQN_LEARNING_MODE"
 }
 
-
 class SuperServer:
     def __init__(self, ctx):
         self.ctx = ctx
@@ -55,6 +54,7 @@ class SuperServer:
 
 class DAGGERServer:
     def __init__(self):
+        # pass 
         self.model = dagger.DAGGER.load()
         # plot.plot_queue.put((dagger.plot, self.model.score_history))
 

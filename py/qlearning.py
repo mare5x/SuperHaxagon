@@ -1,18 +1,23 @@
 from collections import namedtuple, deque
+from pathlib import Path 
 import random
 import math
 
 import torch
 import torch.nn as nn
 import numpy as np
+import matplotlib.pyplot as plt 
 
-from plot import plot_queue
+from plot import plot_queue, moving_average
 
 
 def plot(ax, data):
-    ax.set_title("Q-learning score history (frames)")
-    ax.plot(data)
-    ax.plot(np.convolve(np.array(data), np.ones(10) / 10, mode='same'))  # Rolling average self.model.score_history)
+    ax.set_title("Q-learning score history")
+    x = np.array(data) / 60  # Seconds
+    ax.set_ylabel('Time [s]')
+    ax.set_xlabel('Attempt number')
+    ax.plot(x)
+    ax.plot(moving_average(x, k=10))
 
 def plot_state(ax, state):
     # walls array as structured in the C++ code
@@ -21,6 +26,15 @@ def plot_state(ax, state):
     ax.bar(list(range(6)), height=walls[:,1], bottom=walls[:,0], width=1.0, align='edge')
     ax.bar(list(range(6)), height=state[16:16+6], bottom=0, width=1.0, align='edge', alpha=0.5)  # Current player slot
     ax.plot(state[-1] * 6.0, 0, 'ro')  # Player position
+
+def latest_checkpoint(path):
+    checkpoints = list(path.glob("checkpoint_*.pth"))
+    if len(checkpoints) > 0:
+        n = max(map(int, (p.stem.rsplit('_')[1] for p in checkpoints)))
+        return path / f"checkpoint_{n}.pth"
+    if Path(path, "checkpoint.pth").exists():
+        return Path(path, "checkpoint.pth")
+    return None 
 
 
 INPUT_SIZE = 6*2 + 1 + 3 + 6 + 1
@@ -32,6 +46,8 @@ class SupaNet(nn.Module):
 
         self.net = nn.Sequential(
             nn.Linear(INPUT_SIZE, 16),
+            nn.ReLU(),
+            nn.Linear(16, 16),
             nn.ReLU(),
             nn.Linear(16, OUT_SIZE)
         )
@@ -84,12 +100,12 @@ class SupaDQN:
         self.eps_start = 0.9  # Exploration rate
         self.eps_end = 0.05
         self.eps_decay = 10000
-        self.target_update = 4096  # Update target_net to policy_net every this many steps/frames.
+        self.target_update = 2046  # Update target_net to policy_net every this many steps.
 
-        self.gamma = 0.925  # 0.95 success
+        self.gamma = 0.95
 
-        self.memory = ReplayMemory(20000)
-        self.batch_size = 512
+        self.memory = ReplayMemory(20000)  # Approx. 10 minutes of gameplay
+        self.batch_size = 1024
 
         self.is_learning = False 
         self.score_history = []
@@ -97,6 +113,12 @@ class SupaDQN:
         # The model works with indices [0, 3), but the server expects [-1,0,1].
         self.actions_tr = [-1, 0, 1]  # Map action index to action
         self.actions_tr_inv = { v: i for i, v in enumerate(self.actions_tr) }
+
+        self.checkpoint_enabled = True 
+        self.checkpoint_update_interval = 150  # Episodes (deaths)
+        self.checkpoint_path = Path('./checkpoints/')
+        if self.checkpoint_enabled:
+            self.load_checkpoint()
 
     def reset(self):
         self.state = None
@@ -174,6 +196,9 @@ class SupaDQN:
             reward = -1.0
             action = self.step(None, reward, done=True)
             plot_queue.put((plot, self.score_history))
+
+            if self.checkpoint_enabled and len(self.score_history) % self.checkpoint_update_interval == 0:
+                self.save_checkpoint()
         self.reset()
         return self.actions_tr[action]
 
@@ -190,3 +215,42 @@ class SupaDQN:
     def set_is_learning(self, is_learning):
         self.is_learning = is_learning
         self.reset()
+
+    def save_checkpoint(self):
+        self.checkpoint_path.mkdir(parents=True, exist_ok=True)
+        path = self.checkpoint_path / f"checkpoint_{len(self.score_history)}.pth"
+        state = {
+            'memory': self.memory,
+            'score_history': self.score_history,
+            'steps_taken': self.steps_taken,
+            'policy_net': self.policy_net.state_dict(),
+            'optimizer': self.optimizer.state_dict()
+            # scheduler
+        }
+        torch.save(state, path)
+        print(path)
+
+        fig, ax = plt.subplots()
+        plot(ax, self.score_history)
+        fig.savefig(path.with_suffix(".png"))
+
+    def load_checkpoint(self, path=None):
+        if path is None:
+            # Resume latest checkpoint
+            path = latest_checkpoint(self.checkpoint_path)
+            if path is None:
+                return False
+
+        print(path)
+        state = torch.load(path)
+
+        self.policy_net.load_state_dict(state['policy_net'])
+        self.target_net.load_state_dict(self.policy_net.state_dict())
+        self.optimizer.load_state_dict(state['optimizer'])
+
+        self.memory = state['memory']
+        self.score_history = state['score_history']
+        self.steps_taken = state['steps_taken']
+
+        plot_queue.put((plot, self.score_history))
+        return True
