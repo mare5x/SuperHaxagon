@@ -21,6 +21,9 @@ namespace super_ai {
         float player_pos;  // player angle \in [0,1]
     };
 
+    // Calculate new action for the AI every N-th frame.
+    const int DAGGER_UPDATE_INTERVAL = 2;
+    const int DQN_UPDATE_INTERVAL = 2;
 
     /** Instantly move the player to the best safe slot in the game. */
     void make_move_instant(SuperStruct* super);

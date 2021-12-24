@@ -32,8 +32,6 @@ namespace super_ai {
     // All inputs and outputs in the ANN are normalized [0, 1].
 
     super_client::SuperClient* client;
-
-	unsigned long frame_counter = 0;
 }
 
 
@@ -143,17 +141,13 @@ void super_ai::exit()
 
 void super_ai::report_death(SuperStruct* super)
 {
-    // client->send_episode_score(frame_counter);
     client->send_episode_score(super->get_elapsed_time()); 
-	frame_counter = 0;
 }
 
 int super_ai::get_move_dagger(SuperStruct* super, bool learning)
 {
 	if (!super->is_player_alive())
 		return 0;
-
-	++frame_counter;
 
 	GameState_DAGGER game_state = {};
 	get_game_state_dagger(super, &game_state);
@@ -174,8 +168,6 @@ int super_ai::get_move_dqn(SuperStruct * super, bool learning)
 {
     if (!super->is_player_alive())
         return 0;
-
-    ++frame_counter;
 
     GameState_DQN game_state = {};
     get_game_state_dqn(super, &game_state);

@@ -335,10 +335,14 @@ void SuperHaxagon::update()
 		    super_ai::make_move_instant(&super);
 		    break;
 	    case AUTOPLAY_DAGGER:
-		    start_moving(super_ai::get_move_dagger(&super, setting_ai_learning));
+            if (super.get_elapsed_time() % super_ai::DAGGER_UPDATE_INTERVAL == 0) {
+		        start_moving(super_ai::get_move_dagger(&super, setting_ai_learning));
+            }
 		    break;
         case AUTOPLAY_DQN:
-            start_moving(super_ai::get_move_dqn(&super, setting_ai_learning));
+            if (super.get_elapsed_time() % super_ai::DQN_UPDATE_INTERVAL == 0) {
+                start_moving(super_ai::get_move_dqn(&super, setting_ai_learning));
+            }
             break;
 	    }
     }
