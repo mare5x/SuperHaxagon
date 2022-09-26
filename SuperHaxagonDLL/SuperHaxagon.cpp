@@ -40,6 +40,49 @@ namespace fmodex {
 }
 
 
+namespace speedhack {
+    // Load the speedhack.dll I created in a past project.
+    // Using CheatEngine might be more reliable?
+
+    typedef void(__stdcall *p_api_set_speed)(float);
+
+    HMODULE speedhack_dll;
+    p_api_set_speed f_api_set_speed;
+
+    bool _hooked = false;
+
+    void init()
+    {
+        _hooked = false;
+        speedhack_dll = GetModuleHandle(L"speedhack.dll");
+        if (speedhack_dll == NULL) {
+            printf("Trying to load speedhack.dll\n");
+            // The dll file must be in the same directory as the executable.
+            speedhack_dll = LoadLibraryA("speedhack.dll");
+        }
+        if (speedhack_dll == NULL) {
+            printf("Could not get speedhack.dll handle!\n");
+            return;
+        }
+
+        f_api_set_speed = (p_api_set_speed)GetProcAddress(speedhack_dll, "_api_set_speed@4");
+        if (f_api_set_speed != NULL) {
+            printf("Successfully got speedhack.dll::api_set_speed\n");
+            f_api_set_speed(1.0f);
+            _hooked = true;
+        }
+        else {
+            printf("Didn't find speedhack.dll::api_set_speed\n");
+        }
+    }
+
+    bool is_hooked()
+    {
+        return _hooked;
+    }
+}
+
+
 enum MENU_OPTION : int {
 	DEBUG_LINES, 
     AUTOPLAY, 
@@ -325,10 +368,15 @@ void SuperHaxagon::update()
         }
     }
 
+    int dir;
     if (setting_autoplay) {
 	    switch (setting_autoplay_type) {
 	    case AUTOPLAY_HEURISTIC:
-		    start_moving(super_ai::get_move_heuristic(&super));
+            dir = super_ai::get_move_heuristic(&super);
+            start_moving(dir);
+            if (false) {  // For debugging only
+                super_ai::dump_game_state_dqn(&super, dir);
+            }
 		    break;
 	    case AUTOPLAY_INSTANT:
 		    stop_moving();
@@ -393,6 +441,8 @@ void SuperHaxagon::hook(HMODULE dll)
     p_orig_main_loop = (orig_MainLoop)hook_vtable(super.base_adr, 5, (DWORD)&hooked_main_loop);
 
 	fmodex::init(g_proc_adr);
+
+    speedhack::init();
 
 	super_ai::init();
 }
@@ -465,6 +515,12 @@ void glut_autoplay_menu_func(int option)
 	case MENU_OPTION::AI_LEARNING:
 		setting_ai_learning = !setting_ai_learning;
         super_ai::client->set_learning_mode(setting_ai_learning);
+        if (speedhack::is_hooked()) {  // Speed up when learning
+            if (setting_ai_learning)
+                speedhack::f_api_set_speed(3.0f);
+            else
+                speedhack::f_api_set_speed(1.0f);
+        }
 		break;
 	case MENU_OPTION::AUTOPLAY_HEURISTIC:
 		setting_autoplay_type = AUTOPLAY_HEURISTIC;

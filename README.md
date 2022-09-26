@@ -36,6 +36,11 @@ where _path\_to\_dll_ is the **absolute** path to _SuperHaxagon.dll_.
 
 Access the bot settings menu in-game by pressing the _**middle mouse**_ button.
 
+### Speedhack
+
+If you want training to be speed up, you can add [speedhack.dll](https://github.com/mare5x/speedhack) to the game's folder and it will be used automatically by the program when training.
+You can also use your own speedhack (e.g. CheatEngine works well).
+
 ## Build
 
 1. git clone the repo.
