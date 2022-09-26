@@ -45,11 +45,11 @@ class SupaNet(nn.Module):
         super().__init__()
 
         self.net = nn.Sequential(
-            nn.Linear(INPUT_SIZE, 16),
+            nn.Linear(INPUT_SIZE, 32),
             nn.ReLU(),
-            nn.Linear(16, 16),
+            nn.Linear(32, 32),
             nn.ReLU(),
-            nn.Linear(16, OUT_SIZE)
+            nn.Linear(32, OUT_SIZE)
         )
 
     def forward(self, state):
@@ -97,15 +97,16 @@ class SupaDQN:
         self.reward = 0
 
         self.steps_taken = 0
-        self.eps_start = 0.9  # Exploration rate
-        self.eps_end = 0.05
-        self.eps_decay = 10000
-        self.target_update = 2046  # Update target_net to policy_net every this many steps.
+        self.eps_start = 0.99  # Exploration rate
+        self.eps_end = 0.01
+        self.eps_decay = 20000
+        self.target_update = 1000  # Update target_net to policy_net every this many steps.
 
-        self.gamma = 0.95
+        self.gamma = 0.95  #!!!!!!!!!!!
 
         self.memory = ReplayMemory(20000)  # Approx. 10 minutes of gameplay
-        self.batch_size = 1024
+        self.batch_size = 512  # Take this many samples from memory for each optimization batch
+        self.batch_iterations = 2  # How many training optimization iterations to make for each step
 
         self.is_learning = False 
         self.score_history = []
@@ -140,27 +141,28 @@ class SupaDQN:
         if len(self.memory) < self.batch_size:
             return 
 
-        batch = self.memory.sample(self.batch_size)
-        states = torch.tensor([b.state for b in batch]).to(self.device)
-        actions = torch.tensor([b.action for b in batch]).view(-1, 1).to(self.device)
-        rewards = torch.tensor([b.reward for b in batch]).view(-1, 1).to(self.device)
-        non_final_mask = torch.tensor([b.next_state is not None for b in batch]).to(self.device)
-        non_final_next_states = torch.tensor([b.next_state for b in batch if b.next_state is not None]).to(self.device)
+        for it in range(self.batch_iterations):
+            batch = self.memory.sample(self.batch_size)
+            states = torch.tensor([b.state for b in batch]).to(self.device)
+            actions = torch.tensor([b.action for b in batch]).view(-1, 1).to(self.device)
+            rewards = torch.tensor([b.reward for b in batch]).view(-1, 1).to(self.device)
+            non_final_mask = torch.tensor([b.next_state is not None for b in batch]).to(self.device)
+            non_final_next_states = torch.tensor([b.next_state for b in batch if b.next_state is not None]).to(self.device)
 
-        # Pick the Q values of the selected actions for each state
-        model_Qs = self.policy_net(states).gather(1, actions)
-        # V(s) = 0 if s is final; get best V(s)s
-        next_state_Vs = torch.zeros(self.batch_size, 1).to(self.device)
-        with torch.no_grad():
-            # detach because this happens on the 'target' net, not the online net
-            next_state_Vs[non_final_mask] = self.target_net(non_final_next_states).detach().max(1)[0].view(-1, 1)
-        target_Qs = (next_state_Vs * self.gamma) + rewards 
+            # Pick the Q values of the selected actions for each state
+            model_Qs = self.policy_net(states).gather(1, actions)
+            # V(s) = 0 if s is final; get best V(s)s
+            next_state_Vs = torch.zeros(self.batch_size, 1).to(self.device)
+            with torch.no_grad():
+                # detach because this happens on the 'target' net, not the online net
+                next_state_Vs[non_final_mask] = self.target_net(non_final_next_states).detach().max(1)[0].view(-1, 1)
+            target_Qs = (next_state_Vs * self.gamma) + rewards 
 
-        loss = self.criterion(model_Qs, target_Qs)
+            loss = self.criterion(model_Qs, target_Qs)
 
-        self.optimizer.zero_grad()
-        loss.backward()
-        self.optimizer.step()
+            self.optimizer.zero_grad()
+            loss.backward()
+            self.optimizer.step()
 
     def step(self, next_state, reward, done=False):
         self.steps_taken += 1
