@@ -131,7 +131,7 @@ SuperStruct super;
 
 DWORD render_adr;			// the address of the hook in the original function
 DWORD render_return_adr;	// where to return in the original function
-DWORD render_call_adr;		// the new CALL address 
+DWORD get_super_call_adr;   // 
 std::array<BYTE, 5> orig_render_bytes;
 
 typedef int(__thiscall *orig_MainLoop)(SuperStruct* p_this);
@@ -249,9 +249,8 @@ void __declspec(naked) render_trampoline()
 		POPAD
 		POPFD
 
-		// JMP post_render_cave
-		// Original code replaced by hook:
-		CALL[render_call_adr]
+		// Call the original function replaced by hook with corrected call offset
+		CALL[get_super_call_adr]
 		// JMP back to original code:
 		JMP[render_return_adr]
 	}
@@ -408,31 +407,40 @@ void SuperHaxagon::update()
 
 void SuperHaxagon::hook(HMODULE dll)
 {
+    // NOTE: first versions used static addresses since ASLR is off, but scanning
+    // for signatures is more robust.
+
 	// Create a console shell for debugging purposes.
 	open_console();
 	printf("Hello, world\n");
+
+    g_dll = dll;
+    g_proc_adr = get_proc_address();
+
+
+    // Find the render function by scanning for its signature.
+    const BYTE* render_sig = (const BYTE*)"\x85\xC0\x74\x09\x8B\x10\x8B\xC8\x8B\x42\x18\xFF\xD0";
+    render_adr = find_signature(render_sig, strlen((const char*)render_sig), PAGE_EXECUTE_READ);
+    render_adr -= 5;
+
+    // The first instruction at render_adr is a CALL that gets the Super base address
+    // into eax. So, just call that function :) 
+    get_super_call_adr = render_adr + 5 + read_memory<DWORD>(render_adr + 1);
+    __asm {
+        CALL[get_super_call_adr]
+        mov [super.base_adr], eax
+    }
 	printf("SuperStruct base: %x\n", super.base_adr);
 
-	g_dll = dll;
-	g_proc_adr = get_proc_address();
-
-	hook_glut(WINDOW_TITLE);
-	g_hwnd = FindWindowA(NULL, WINDOW_TITLE);
-
-	// Hook the window input handler.
-	orig_wnd_proc = (WNDPROC)GetWindowLongPtr(g_hwnd, GWLP_WNDPROC);
-	SetWindowLongPtr(g_hwnd, GWLP_WNDPROC, (LONG_PTR)&input_handler);
-
+    // Now replace the first instruction to call our render trampoline function instead.
 	// Hook Super Hexagon's main render function. The function is called before glSwapBuffers, which
 	// allows us to set the GL state before the game draws its own stuff.
 	// Special care when hooking, because we are hooking a CALL instruction. That means we can't 
 	// just execute that same instruction from somewhere else, since the CALL contains a relative address.
-	render_adr = g_proc_adr + 0x75B6D;
-	memcpy(orig_render_bytes.data(), (BYTE*)render_adr, orig_render_bytes.size());
-	jump_hook(render_adr, (DWORD)&render_trampoline, 5);
-	render_call_adr = g_proc_adr + 0x653d0;
+    memcpy(orig_render_bytes.data(), (BYTE*)render_adr, orig_render_bytes.size());
 	render_return_adr = render_adr + 5;
-
+    DWORD tmp = (DWORD)&render_trampoline - render_return_adr;
+    write_code_buffer(render_adr + 1, (const BYTE*)&tmp, 4);
 
     // Hook Super Hexagon's main update loop function using a VMT hook.
     // Replace the main loop method in the virtual method table with our own.
@@ -441,10 +449,15 @@ void SuperHaxagon::hook(HMODULE dll)
     p_orig_main_loop = (orig_MainLoop)hook_vtable(super.base_adr, 5, (DWORD)&hooked_main_loop);
 
 	fmodex::init(g_proc_adr);
-
     speedhack::init();
-
 	super_ai::init();
+
+    hook_glut(WINDOW_TITLE);
+    g_hwnd = FindWindowA(NULL, WINDOW_TITLE);
+
+    // Hook the window input handler.
+    orig_wnd_proc = (WNDPROC)GetWindowLongPtr(g_hwnd, GWLP_WNDPROC);
+    SetWindowLongPtr(g_hwnd, GWLP_WNDPROC, (LONG_PTR)&input_handler);
 }
 
 

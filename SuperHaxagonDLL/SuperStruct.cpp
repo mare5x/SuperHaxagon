@@ -65,8 +65,10 @@ int SuperStruct::slot_to_world_angle(int slot) const
 
 DWORD SuperStruct::get_base_address()
 {
-	// Since ASLR (Address Space Load Randomization) is off for Super Hexagon, we can use static addresses. 
-	return read_memory<DWORD>(get_proc_address() + 0x2857F0);
+    // Since ASLR (Address Space Load Randomization) is off for Super Hexagon, we can use static addresses. 
+	// return read_memory<DWORD>(get_proc_address() + 0x2857F0);
+    // A different approach is used now; see SuperHaxagon::hook
+    return 0;
 }
 
 void SuperStruct::update_walls()

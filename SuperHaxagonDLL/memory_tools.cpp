@@ -129,6 +129,7 @@ DWORD find_signature(const BYTE signature[], size_t size, DWORD protection)
 
 	while (page.valid()) {
 		DWORD address = page.base_adr;
+        // printf("Scanning page: %x\n", address);
 		size_t signature_idx = 0;
 
 		do {

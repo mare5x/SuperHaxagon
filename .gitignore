@@ -1,4 +1,7 @@
 Debug/
+Release/
+/py/checkpoints/
+/py/runs/
 .vs/
 *.obj
 *.vcxproj.*
