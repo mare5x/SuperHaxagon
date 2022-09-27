@@ -7,6 +7,7 @@ import torch
 import torch.nn as nn
 import numpy as np
 import matplotlib.pyplot as plt 
+from torch.utils.tensorboard import SummaryWriter
 
 from plot import plot_queue, moving_average
 
@@ -92,21 +93,30 @@ class SupaDQN:
         self.optimizer = torch.optim.Adam(self.policy_net.parameters())
         self.criterion = torch.nn.MSELoss()  # TODO: Try huber, mse, l1, ...
 
+        ### Hyperparams
+        params = {
+            "eps_start": 0.99,  # Exploration rate
+            "eps_end": 0.01,
+            "eps_decay": 20000,
+            "target_update": 1000,  # Update target_net to policy_net every this many steps.
+            "gamma": 0.95,  #!!!!!!!!!!!
+            "memory_size": 20000,    # Approx. 10 minutes of gameplay
+            "batch_size": 8,  # Take this many samples from memory for each optimization batch
+            "batch_iterations": 2,  # How many training optimization iterations to make for each step
+            "reward_interval": 60,  # Receive reward after this many successful steps,
+            "default_reward": 0.1,
+            "loss_reward": -2,
+            "interval_reward": 1,
+        }
+        for param, value in params.items():
+            setattr(self, param, value)
+        ###
+
         self.state = None
         self.action = 0
         self.reward = 0
-
+        self.memory = ReplayMemory(self.memory_size)
         self.steps_taken = 0
-        self.eps_start = 0.99  # Exploration rate
-        self.eps_end = 0.01
-        self.eps_decay = 20000
-        self.target_update = 1000  # Update target_net to policy_net every this many steps.
-
-        self.gamma = 0.95  #!!!!!!!!!!!
-
-        self.memory = ReplayMemory(20000)  # Approx. 10 minutes of gameplay
-        self.batch_size = 512  # Take this many samples from memory for each optimization batch
-        self.batch_iterations = 2  # How many training optimization iterations to make for each step
 
         self.is_learning = False 
         self.score_history = []
@@ -115,11 +125,14 @@ class SupaDQN:
         self.actions_tr = [-1, 0, 1]  # Map action index to action
         self.actions_tr_inv = { v: i for i, v in enumerate(self.actions_tr) }
 
+        experiment_name = "exp3"
+        self.tb_writer = SummaryWriter(f"runs/{experiment_name}")  # For tensorboard
         self.checkpoint_enabled = True 
         self.checkpoint_update_interval = 150  # Episodes (deaths)
-        self.checkpoint_path = Path('./checkpoints/')
+        self.checkpoint_path = Path(f'./checkpoints/{experiment_name}')
         if self.checkpoint_enabled:
             self.load_checkpoint()
+        self.tb_writer.add_hparams(params, { "hparams/MSE": 0 }, run_name=experiment_name)
 
     def reset(self):
         self.state = None
@@ -158,11 +171,12 @@ class SupaDQN:
                 next_state_Vs[non_final_mask] = self.target_net(non_final_next_states).detach().max(1)[0].view(-1, 1)
             target_Qs = (next_state_Vs * self.gamma) + rewards 
 
-            loss = self.criterion(model_Qs, target_Qs)
-
             self.optimizer.zero_grad()
+            loss = self.criterion(model_Qs, target_Qs)
             loss.backward()
             self.optimizer.step()
+
+            self.tb_writer.add_scalar("Loss", loss, self.steps_taken)
 
     def step(self, next_state, reward, done=False):
         self.steps_taken += 1
@@ -185,22 +199,25 @@ class SupaDQN:
         self.state = next_state 
         if not done:
             self.action = self.pick_action(next_state)
-            return self.action
         else:
-            # print(self.state, self.action, reward, next_state)
-            print(self.exploration_rate(self.steps_taken))
-            return self.actions_tr_inv[0]
+            self.action = self.actions_tr_inv[0]
+
+        self.tb_writer.add_scalar("Step", self.steps_taken, self.steps_taken)
+        self.tb_writer.add_scalar("Exploration rate", self.exploration_rate(self.steps_taken), self.steps_taken)
+
+        return self.action
 
     def on_episode_end(self, score=None):
         action = self.actions_tr_inv[0]
         if self.is_learning:
             self.score_history.append(score)
-            reward = -1.0
+            reward = self.loss_reward
             action = self.step(None, reward, done=True)
             plot_queue.put((plot, self.score_history))
 
             if self.checkpoint_enabled and len(self.score_history) % self.checkpoint_update_interval == 0:
                 self.save_checkpoint()
+        self.tb_writer.add_scalar("Score", score, self.steps_taken)
         self.reset()
         return self.actions_tr[action]
 
@@ -208,7 +225,7 @@ class SupaDQN:
         # plot_queue.put((plot_state, state))
 
         if self.is_learning:
-            reward = 0
+            reward = self.interval_reward if self.steps_taken % self.reward_interval == 0 else self.default_reward
             action = self.step(state, reward, done=False)
         else:
             action = self.pick_action(state)
