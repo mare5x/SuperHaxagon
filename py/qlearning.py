@@ -46,11 +46,11 @@ class SupaNet(nn.Module):
         super().__init__()
 
         self.net = nn.Sequential(
-            nn.Linear(INPUT_SIZE, 32),
+            nn.Linear(INPUT_SIZE, 48),
             nn.ReLU(),
-            nn.Linear(32, 32),
+            nn.Linear(48, 48),
             nn.ReLU(),
-            nn.Linear(32, OUT_SIZE)
+            nn.Linear(48, OUT_SIZE)
         )
 
     def forward(self, state):
@@ -79,7 +79,9 @@ class ReplayMemory:
         return repr(self.memory)
 
 class SupaDQN:
-    def __init__(self):
+    def __init__(self, experiment_name="exp4"):
+        self.experiment_name = experiment_name
+
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
         # Double Q-learning uses two networks.
@@ -94,21 +96,23 @@ class SupaDQN:
         self.criterion = torch.nn.MSELoss()  # TODO: Try huber, mse, l1, ...
 
         ### Hyperparams
-        params = {
-            "eps_start": 0.99,  # Exploration rate
+        self.params = {
+            "eps_start": 0.99,      # Exploration rate
             "eps_end": 0.01,
             "eps_decay": 20000,
+            "eps_restart": True,    # Restart exploration after this many steps
+            "eps_restart_steps": 1_000_000,
             "target_update": 1000,  # Update target_net to policy_net every this many steps.
-            "gamma": 0.95,  #!!!!!!!!!!!
-            "memory_size": 20000,    # Approx. 10 minutes of gameplay
-            "batch_size": 8,  # Take this many samples from memory for each optimization batch
+            "gamma": 0.95,          # Reward decay rate !!!!!!!!!!!
+            "memory_size": 20000,   # Approx. 10 minutes of gameplay
+            "batch_size": 8,        # Take this many samples from memory for each optimization batch
             "batch_iterations": 2,  # How many training optimization iterations to make for each step
-            "reward_interval": 60,  # Receive reward after this many successful steps,
-            "default_reward": 0.1,
-            "loss_reward": -2,
+            "reward_interval": 60,  # Receive interval_reward reward after this many successful steps
+            "default_reward": 0.1,  # Receive reward each step
+            "loss_reward": -5,      # Reward when game over
             "interval_reward": 1,
         }
-        for param, value in params.items():
+        for param, value in self.params.items():
             setattr(self, param, value)
         ###
 
@@ -125,14 +129,12 @@ class SupaDQN:
         self.actions_tr = [-1, 0, 1]  # Map action index to action
         self.actions_tr_inv = { v: i for i, v in enumerate(self.actions_tr) }
 
-        experiment_name = "exp3"
-        self.tb_writer = SummaryWriter(f"runs/{experiment_name}")  # For tensorboard
+        self.tb_writer = SummaryWriter(f"runs/{self.experiment_name}")  # For tensorboard
         self.checkpoint_enabled = True 
         self.checkpoint_update_interval = 150  # Episodes (deaths)
-        self.checkpoint_path = Path(f'./checkpoints/{experiment_name}')
+        self.checkpoint_path = Path(f'./checkpoints/{self.experiment_name}')
         if self.checkpoint_enabled:
             self.load_checkpoint()
-        self.tb_writer.add_hparams(params, { "hparams/MSE": 0 }, run_name=experiment_name)
 
     def reset(self):
         self.state = None
@@ -140,6 +142,8 @@ class SupaDQN:
         self.reward = 0
 
     def exploration_rate(self, t):
+        if self.eps_restart:
+            t = t % self.eps_restart_steps
         return self.eps_end + (self.eps_start - self.eps_end) * math.exp(-t / self.eps_decay)
 
     def pick_action(self, state):
@@ -201,10 +205,6 @@ class SupaDQN:
             self.action = self.pick_action(next_state)
         else:
             self.action = self.actions_tr_inv[0]
-
-        self.tb_writer.add_scalar("Step", self.steps_taken, self.steps_taken)
-        self.tb_writer.add_scalar("Exploration rate", self.exploration_rate(self.steps_taken), self.steps_taken)
-
         return self.action
 
     def on_episode_end(self, score=None):
@@ -217,7 +217,11 @@ class SupaDQN:
 
             if self.checkpoint_enabled and len(self.score_history) % self.checkpoint_update_interval == 0:
                 self.save_checkpoint()
+        
+        self.tb_writer.add_scalar("Exploration rate", self.exploration_rate(self.steps_taken), self.steps_taken)
         self.tb_writer.add_scalar("Score", score, self.steps_taken)
+        self.tb_writer.flush()
+        
         self.reset()
         return self.actions_tr[action]
 
@@ -243,7 +247,8 @@ class SupaDQN:
             'score_history': self.score_history,
             'steps_taken': self.steps_taken,
             'policy_net': self.policy_net.state_dict(),
-            'optimizer': self.optimizer.state_dict()
+            'optimizer': self.optimizer.state_dict(),
+            'params': self.params,
             # scheduler
         }
         torch.save(state, path)
@@ -252,6 +257,9 @@ class SupaDQN:
         fig, ax = plt.subplots()
         plot(ax, self.score_history)
         fig.savefig(path.with_suffix(".png"))
+
+        self.tb_writer.add_hparams(self.params, { "hparams/avg_score": sum(self.score_history[-10:]) / 10 }, run_name=f"{self.experiment_name}_{len(self.score_history)}")
+        self.tb_writer.flush()
 
     def load_checkpoint(self, path=None):
         if path is None:
@@ -270,6 +278,10 @@ class SupaDQN:
         self.memory = state['memory']
         self.score_history = state['score_history']
         self.steps_taken = state['steps_taken']
+
+        self.params = state['params']
+        for param, value in self.params.items():
+            setattr(self, param, value)
 
         plot_queue.put((plot, self.score_history))
         return True
