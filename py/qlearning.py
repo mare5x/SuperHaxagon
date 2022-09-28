@@ -46,11 +46,11 @@ class SupaNet(nn.Module):
         super().__init__()
 
         self.net = nn.Sequential(
-            nn.Linear(INPUT_SIZE, 48),
+            nn.Linear(INPUT_SIZE, 32),
             nn.ReLU(),
-            nn.Linear(48, 48),
+            nn.Linear(32, 32),
             nn.ReLU(),
-            nn.Linear(48, OUT_SIZE)
+            nn.Linear(32, OUT_SIZE)
         )
 
     def forward(self, state):
@@ -61,8 +61,10 @@ Transition = namedtuple('Transition',
                         ('state', 'action', 'reward', 'next_state'))
 
 class ReplayMemory:
-    def __init__(self, capacity):
+    def __init__(self, capacity, strategy="uniform"):
+        self.strategy = strategy
         self.memory = deque([], maxlen=capacity)
+        self.weights = [1] * capacity
 
     def push(self, *args):
         item = Transition(*args)
@@ -70,7 +72,22 @@ class ReplayMemory:
         return item
 
     def sample(self, batch_size):
-        return random.sample(self.memory, batch_size)
+        if self.strategy == "weighted_negative":
+            prev = self.memory[0]
+            for i, item in enumerate(self.memory):
+                if i == 0 or prev.reward < 0:
+                    self.weights[i] = 1
+                else:
+                    self.weights[i] = self.weights[i - 1] + 1
+                prev = item
+            if len(self.memory) < self.memory.maxlen:
+                weights = self.weights[:len(self.memory)]
+            else:
+                weights = self.weights
+            return random.choices(self.memory, weights=weights, k=batch_size)
+        elif self.strategy == "uniform":
+            return random.sample(self.memory, batch_size)
+        raise ValueError(f"Unknown strategy: {self.strategy}")
 
     def __len__(self):
         return len(self.memory)
@@ -79,7 +96,7 @@ class ReplayMemory:
         return repr(self.memory)
 
 class SupaDQN:
-    def __init__(self, experiment_name="exp4"):
+    def __init__(self, experiment_name="exp15"):
         self.experiment_name = experiment_name
 
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -98,19 +115,20 @@ class SupaDQN:
         ### Hyperparams
         self.params = {
             "eps_start": 0.99,      # Exploration rate
-            "eps_end": 0.01,
+            "eps_end": 0.0001,
             "eps_decay": 20000,
-            "eps_restart": True,    # Restart exploration after this many steps
-            "eps_restart_steps": 1_000_000,
-            "target_update": 1000,  # Update target_net to policy_net every this many steps.
+            "eps_restart": False,    # Restart exploration after this many steps
+            "eps_restart_steps": 400_000,
+            "target_update": 1000,   # Update target_net to policy_net every this many steps.
             "gamma": 0.95,          # Reward decay rate !!!!!!!!!!!
             "memory_size": 20000,   # Approx. 10 minutes of gameplay
-            "batch_size": 8,        # Take this many samples from memory for each optimization batch
+            "memory_sample_strategy": "uniform",  # Memory sampling strategy
+            "batch_size": 8,       # Take this many samples from memory for each optimization batch
             "batch_iterations": 2,  # How many training optimization iterations to make for each step
             "reward_interval": 60,  # Receive interval_reward reward after this many successful steps
             "default_reward": 0.1,  # Receive reward each step
-            "loss_reward": -5,      # Reward when game over
-            "interval_reward": 1,
+            "loss_reward": -2,      # Reward when game over
+            "interval_reward": 0.5,
         }
         for param, value in self.params.items():
             setattr(self, param, value)
@@ -119,8 +137,9 @@ class SupaDQN:
         self.state = None
         self.action = 0
         self.reward = 0
-        self.memory = ReplayMemory(self.memory_size)
+        self.memory = ReplayMemory(self.memory_size, strategy=self.memory_sample_strategy)
         self.steps_taken = 0
+        self.frame_number = 0  # Frame number in episode
 
         self.is_learning = False 
         self.score_history = []
@@ -140,6 +159,7 @@ class SupaDQN:
         self.state = None
         self.action = 0
         self.reward = 0
+        self.frame_number = 0
 
     def exploration_rate(self, t):
         if self.eps_restart:
@@ -180,7 +200,7 @@ class SupaDQN:
             loss.backward()
             self.optimizer.step()
 
-            self.tb_writer.add_scalar("Loss", loss, self.steps_taken)
+            # self.tb_writer.add_scalar("Loss", loss, self.steps_taken)
 
     def step(self, next_state, reward, done=False):
         self.steps_taken += 1
@@ -227,9 +247,13 @@ class SupaDQN:
 
     def get_action(self, state):
         # plot_queue.put((plot_state, state))
+        self.frame_number += 1
 
         if self.is_learning:
-            reward = self.interval_reward if self.steps_taken % self.reward_interval == 0 else self.default_reward
+            reward = self.default_reward
+            if self.frame_number % self.reward_interval == 0:
+                reward += self.interval_reward
+            # TODO reward shaping: add reward if centered, if has free slot
             action = self.step(state, reward, done=False)
         else:
             action = self.pick_action(state)
