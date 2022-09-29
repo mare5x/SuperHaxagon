@@ -120,6 +120,8 @@ int setting_wall_speed = -1;
 bool setting_auto_restart = false;  // automatically restart the game when dead
 bool setting_ai_learning = false;
 bool setting_special_effects = true;
+float setting_speedhack = 1.0f;
+std::array<float, 7> setting_speedhack_options = { 0.5f, 1.0f, 1.5f, 2.0f, 3.0f, 4.0f, 5.0f };
 
 HMODULE g_dll;
 HWND g_hwnd;
@@ -518,6 +520,13 @@ void glut_wall_speed_menu_func(int speed)
 	setting_wall_speed = speed;
 }
 
+void glut_speedhack_menu_func(int speed_option)
+{
+    setting_speedhack = setting_speedhack_options[speed_option];
+    if (speedhack::is_hooked()) {
+        speedhack::f_api_set_speed(setting_speedhack);
+    }
+}
 
 void glut_autoplay_menu_func(int option)
 {
@@ -530,9 +539,9 @@ void glut_autoplay_menu_func(int option)
         super_ai::client->set_learning_mode(setting_ai_learning);
         if (speedhack::is_hooked()) {  // Speed up when learning
             if (setting_ai_learning)
-                speedhack::f_api_set_speed(3.0f);
+                glut_speedhack_menu_func(4);
             else
-                speedhack::f_api_set_speed(1.0f);
+                glut_speedhack_menu_func(1);
         }
 		break;
 	case MENU_OPTION::AUTOPLAY_HEURISTIC:
@@ -599,6 +608,14 @@ void hook_glut(const char* title)
 	glutAddMenuEntry("DAGGER", MENU_OPTION::AUTOPLAY_DAGGER);
     glutAddMenuEntry("DQN", MENU_OPTION::AUTOPLAY_DQN);
 
+    int speedhack_menu = glutCreateMenu(&glut_speedhack_menu_func);
+    static char text[1024] = {};
+    snprintf(text, sizeof(text), "%d %d", mouse_x, mouse_y);
+    for (int i = 0; i < setting_speedhack_options.size(); ++i) {
+        snprintf(text, sizeof(text), "%.2f", setting_speedhack_options[i]);
+        glutAddMenuEntry(text, i);
+    }
+
 	glutCreateMenu(&glut_menu_func);
 	glutAddSubMenu("Autoplay settings", autoplay_menu);
     glutAddMenuEntry("Render special effects", MENU_OPTION::SPECIAL_EFFECTS);
@@ -607,6 +624,7 @@ void hook_glut(const char* title)
 	glutAddMenuEntry("Enable/disable zoom out", MENU_OPTION::ZOOM);
 	glutAddSubMenu("Set rotation speed", rotation_speed_menu);
 	glutAddSubMenu("Set wall speed", wall_speed_menu);
+    glutAddSubMenu("Set game speed", speedhack_menu);
 	glutAttachMenu(GLUT_MIDDLE_BUTTON);
 }
 
@@ -655,7 +673,7 @@ void draw_debug_strings()
 	snprintf(text, sizeof(text), "%d", super.get_wall_speed());
 	draw_text(text, x, y * line++);
 
-    line = 4;
+    line = 5;
     int w = window_rect.right - window_rect.left + 1;
     int h = window_rect.bottom - window_rect.top + 1;
     snprintf(text, sizeof(text), "Learn: %d", setting_ai_learning);
@@ -665,6 +683,8 @@ void draw_debug_strings()
     snprintf(text, sizeof(text), "AI type: %d", setting_autoplay_type);
     draw_text(text, w - 128, h - y * line--);
     snprintf(text, sizeof(text), "SFX: %d", setting_special_effects);
+    draw_text(text, w - 128, h - y * line--);
+    snprintf(text, sizeof(text), "Speed: %.2f", setting_speedhack);
     draw_text(text, w - 128, h - y * line--);
 }
 
