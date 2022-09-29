@@ -20,6 +20,28 @@ def plot(ax, data):
     ax.plot(x)
     ax.plot(moving_average(x, k=10))
 
+def state_to_struct(state: list) -> dict:
+    # This function must be defined based on the C++ GameState_DQN struct.
+    walls = np.array(state[:12]).reshape(6, 2)
+    n_slots = state[13:16].index(1) + 4
+    cur_slot = next(i for i, x in enumerate(state[16:16+6]) if x > 0)
+    player_pos = state[-1] * 6.0
+    return {
+        "walls": walls,
+        "n_slots": n_slots,
+        "cur_slot": cur_slot,
+        "player_pos": player_pos,
+    }
+
+def get_cur_wall_dist(state_struct: dict) -> tuple:
+    dist, width = state_struct["walls"][state_struct["cur_slot"]]
+    return dist, width
+
+def get_cur_center_offset(state_struct: dict) -> float:
+    # -1: left edge, 0: center, 1: right edge
+    pos = state_struct["player_pos"] * state_struct["n_slots"] 
+    return (pos % 1.0) * 2.0 - 1.0
+
 def plot_state(ax, state):
     # walls array as structured in the C++ code
     walls = np.array(state[:12]).reshape(6, 2)
@@ -96,7 +118,7 @@ class ReplayMemory:
         return repr(self.memory)
 
 class SupaDQN:
-    def __init__(self, experiment_name="exp15"):
+    def __init__(self, experiment_name="exp16"):
         self.experiment_name = experiment_name
 
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -123,12 +145,16 @@ class SupaDQN:
             "gamma": 0.95,          # Reward decay rate !!!!!!!!!!!
             "memory_size": 20000,   # Approx. 10 minutes of gameplay
             "memory_sample_strategy": "uniform",  # Memory sampling strategy
-            "batch_size": 8,       # Take this many samples from memory for each optimization batch
+            "batch_size": 8,        # Take this many samples from memory for each optimization batch
             "batch_iterations": 2,  # How many training optimization iterations to make for each step
+            "reward_slot_center": True,  # Receive reward for being close to the center of a slot
+            "reward_slot_center_amount": 0.2,
+            "reward_far_wall": True,  # Receive reward for being on a slot where the wall is far away
+            "reward_far_wall_amount": 0.5,
             "reward_interval": 60,  # Receive interval_reward reward after this many successful steps
+            "interval_reward": 0.5,
             "default_reward": 0.1,  # Receive reward each step
             "loss_reward": -2,      # Reward when game over
-            "interval_reward": 0.5,
         }
         for param, value in self.params.items():
             setattr(self, param, value)
@@ -251,10 +277,18 @@ class SupaDQN:
 
         if self.is_learning:
             reward = self.default_reward
+            # Reward shaping
             if self.frame_number % self.reward_interval == 0:
                 reward += self.interval_reward
-            # TODO reward shaping: add reward if centered, if has free slot
-            action = self.step(state, reward, done=False)
+            state_struct = state_to_struct(state)
+            if self.reward_slot_center:
+                center_offset = get_cur_center_offset(state_struct)
+                reward += self.reward_slot_center_amount * pow(1 - abs(center_offset), 4)
+            if self.reward_far_wall:
+                wall_dist, wall_width = get_cur_wall_dist(state_struct)
+                if wall_dist > 0.15:
+                    reward += self.reward_far_wall_amount * wall_dist
+            action = self.step(state, float(reward), done=False)
         else:
             action = self.pick_action(state)
         return self.actions_tr[action]
