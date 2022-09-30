@@ -1,4 +1,4 @@
-from collections import namedtuple, deque
+from collections import defaultdict, namedtuple, deque
 from pathlib import Path 
 import random
 import math
@@ -64,16 +64,15 @@ INPUT_SIZE = 6*2 + 1 + 3 + 6 + 1
 OUT_SIZE = 3
 
 class SupaNet(nn.Module):
-    def __init__(self):
+    def __init__(self, sizes=[32, 32]):
         super().__init__()
 
-        self.net = nn.Sequential(
-            nn.Linear(INPUT_SIZE, 32),
-            nn.ReLU(),
-            nn.Linear(32, 32),
-            nn.ReLU(),
-            nn.Linear(32, OUT_SIZE)
-        )
+        sizes = [INPUT_SIZE] + sizes + [OUT_SIZE]
+        self.net = nn.Sequential()
+        for idx, (in_size, out_size) in enumerate(zip(sizes, sizes[1:])):
+            self.net.add_module(str(2*idx), nn.Linear(in_size, out_size))
+            if idx < len(sizes) - 2:
+                self.net.add_module(str(2*idx + 1), nn.ReLU())
 
     def forward(self, state):
         return self.net(state)
@@ -83,18 +82,36 @@ Transition = namedtuple('Transition',
                         ('state', 'action', 'reward', 'next_state'))
 
 class ReplayMemory:
-    def __init__(self, capacity, strategy="uniform"):
-        self.strategy = strategy
+    def __init__(self, capacity, sample_strategy="uniform", filter_strategy="none"):
+        self.sample_strategy = sample_strategy
+        self.filter_strategy = filter_strategy
         self.memory = deque([], maxlen=capacity)
         self.weights = [1] * capacity
+        self.replay_counts = defaultdict(int)
 
     def push(self, *args):
+        def update_count(item):
+            self.replay_counts[item] += 1
+            if len(self.memory) == self.memory.maxlen:
+                to_be_popped = self.memory[0]
+                self.replay_counts[to_be_popped] -= 1
+                if self.replay_counts[to_be_popped] == 0:
+                    del self.replay_counts[to_be_popped]
+
         item = Transition(*args)
-        self.memory.append(item)
+        if self.filter_strategy == "none":
+            update_count(item)
+            self.memory.append(item)
+        elif self.filter_strategy == "keepone":
+            if self.replay_counts[item] < 1:
+                update_count(item)
+                self.memory.append(item)
+        else:
+            raise ValueError(f"Unknown filter strategy: {self.filter_strategy}")
         return item
 
     def sample(self, batch_size):
-        if self.strategy == "weighted_negative":
+        if self.sample_strategy == "weighted_negative":
             prev = self.memory[0]
             for i, item in enumerate(self.memory):
                 if i == 0 or prev.reward < 0:
@@ -107,9 +124,9 @@ class ReplayMemory:
             else:
                 weights = self.weights
             return random.choices(self.memory, weights=weights, k=batch_size)
-        elif self.strategy == "uniform":
+        elif self.sample_strategy == "uniform":
             return random.sample(self.memory, batch_size)
-        raise ValueError(f"Unknown strategy: {self.strategy}")
+        raise ValueError(f"Unknown sample strategy: {self.sample_strategy}")
 
     def __len__(self):
         return len(self.memory)
@@ -118,15 +135,42 @@ class ReplayMemory:
         return repr(self.memory)
 
 class SupaDQN:
-    def __init__(self, experiment_name="exp16"):
+    def __init__(self, experiment_name="exp22"):
         self.experiment_name = experiment_name
+
+        ### Hyperparams
+        self.params = {
+            "nn_sizes": [64, 32, 16],  # Number of neurons in hidden layers
+            "eps_start": 0.5,      # Exploration rate
+            "eps_end": 0.001,
+            "eps_decay": 20000,
+            "eps_restart": False,    # Restart exploration after this many steps
+            "eps_restart_steps": 500_000,
+            "target_update": 1000,   # Update target_net to policy_net every this many steps.
+            "gamma": 0.91,          # Reward decay rate !!!!!!!!!!!
+            "memory_size": 20000,   # Approx. 10 minutes of gameplay
+            "memory_sample_strategy": "uniform",  # Memory sampling strategy
+            "memory_filter_strategy": "keepone",
+            "batch_size": 8,        # Take this many samples from memory for each optimization batch
+            "batch_iterations": 2,  # How many training optimization iterations to make for each step
+            "reward_slot_center": True,  # Receive reward for being close to the center of a slot
+            "reward_slot_center_amount": 0.2,
+            "reward_far_wall": True,  # Receive reward for being on a slot where the wall is far away
+            "reward_interval": 60,  # Receive interval_reward reward after this many successful steps
+            "interval_reward": 0,
+            "default_reward": 0.01,  # Receive reward each step
+            "loss_reward": -2,      # Reward when game over
+        }
+        for param, value in self.params.items():
+            setattr(self, param, value)
+        ###
 
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
         # Double Q-learning uses two networks.
         # target_net is a periodic copy of policy_net.
-        self.policy_net = SupaNet().to(self.device)
-        self.target_net = SupaNet().to(self.device)
+        self.policy_net = SupaNet(self.nn_sizes).to(self.device)
+        self.target_net = SupaNet(self.nn_sizes).to(self.device)
         self.target_net.load_state_dict(self.policy_net.state_dict())
         self.policy_net.train()
         self.target_net.eval()
@@ -134,36 +178,11 @@ class SupaDQN:
         self.optimizer = torch.optim.Adam(self.policy_net.parameters())
         self.criterion = torch.nn.MSELoss()  # TODO: Try huber, mse, l1, ...
 
-        ### Hyperparams
-        self.params = {
-            "eps_start": 0.99,      # Exploration rate
-            "eps_end": 0.0001,
-            "eps_decay": 20000,
-            "eps_restart": False,    # Restart exploration after this many steps
-            "eps_restart_steps": 400_000,
-            "target_update": 1000,   # Update target_net to policy_net every this many steps.
-            "gamma": 0.95,          # Reward decay rate !!!!!!!!!!!
-            "memory_size": 20000,   # Approx. 10 minutes of gameplay
-            "memory_sample_strategy": "uniform",  # Memory sampling strategy
-            "batch_size": 8,        # Take this many samples from memory for each optimization batch
-            "batch_iterations": 2,  # How many training optimization iterations to make for each step
-            "reward_slot_center": True,  # Receive reward for being close to the center of a slot
-            "reward_slot_center_amount": 0.2,
-            "reward_far_wall": True,  # Receive reward for being on a slot where the wall is far away
-            "reward_far_wall_amount": 0.5,
-            "reward_interval": 60,  # Receive interval_reward reward after this many successful steps
-            "interval_reward": 0.5,
-            "default_reward": 0.1,  # Receive reward each step
-            "loss_reward": -2,      # Reward when game over
-        }
-        for param, value in self.params.items():
-            setattr(self, param, value)
-        ###
-
         self.state = None
         self.action = 0
         self.reward = 0
-        self.memory = ReplayMemory(self.memory_size, strategy=self.memory_sample_strategy)
+        self.memory = ReplayMemory(self.memory_size, 
+            sample_strategy=self.memory_sample_strategy, filter_strategy=self.memory_filter_strategy)
         self.steps_taken = 0
         self.frame_number = 0  # Frame number in episode
 
@@ -176,10 +195,11 @@ class SupaDQN:
 
         self.tb_writer = SummaryWriter(f"runs/{self.experiment_name}")  # For tensorboard
         self.checkpoint_enabled = True 
-        self.checkpoint_update_interval = 150  # Episodes (deaths)
+        self.checkpoint_update_interval = 20_000  # Steps
         self.checkpoint_path = Path(f'./checkpoints/{self.experiment_name}')
         if self.checkpoint_enabled:
             self.load_checkpoint()
+        self.tb_writer.add_text("params", str(self.params), self.steps_taken)
 
     def reset(self):
         self.state = None
@@ -242,7 +262,7 @@ class SupaDQN:
         # When done=True, next_state is None
         # Store (s,a,r,s') into replay memory.
         # N.B. all values are Python types (not tensors).
-        self.memory.push(self.state, self.action, reward, next_state)
+        self.memory.push(tuple(self.state), self.action, reward, tuple(next_state) if next_state is not None else next_state)
 
         self.optimize()
 
@@ -261,12 +281,11 @@ class SupaDQN:
             action = self.step(None, reward, done=True)
             plot_queue.put((plot, self.score_history))
 
-            if self.checkpoint_enabled and len(self.score_history) % self.checkpoint_update_interval == 0:
-                self.save_checkpoint()
-        
-        self.tb_writer.add_scalar("Exploration rate", self.exploration_rate(self.steps_taken), self.steps_taken)
-        self.tb_writer.add_scalar("Score", score, self.steps_taken)
-        self.tb_writer.flush()
+            self.tb_writer.add_scalar("Exploration rate", self.exploration_rate(self.steps_taken), self.steps_taken)
+            self.tb_writer.add_scalar("Memory size", len(self.memory.memory), self.steps_taken)
+            self.tb_writer.add_scalar("Score/Score vs step", score, self.steps_taken)
+            self.tb_writer.add_scalar("Score/Score vs episode", score, len(self.score_history))
+            self.tb_writer.flush()
         
         self.reset()
         return self.actions_tr[action]
@@ -286,9 +305,12 @@ class SupaDQN:
                 reward += self.reward_slot_center_amount * pow(1 - abs(center_offset), 4)
             if self.reward_far_wall:
                 wall_dist, wall_width = get_cur_wall_dist(state_struct)
-                if wall_dist > 0.15:
-                    reward += self.reward_far_wall_amount * wall_dist
+                p = (0.9245396553821594, 0.24907641877394124, -0.5016171990847569)
+                reward += p[0] * pow(wall_dist, p[1]) + p[2]
             action = self.step(state, float(reward), done=False)
+
+            if self.checkpoint_enabled and self.steps_taken % self.checkpoint_update_interval == 0:
+                self.save_checkpoint()
         else:
             action = self.pick_action(state)
         return self.actions_tr[action]
@@ -298,8 +320,10 @@ class SupaDQN:
         self.reset()
 
     def save_checkpoint(self):
+        # print([x[1] for x in sorted(self.memory.replay_counts.items(), key=lambda x: x[1], reverse=True)[:100]])
+
         self.checkpoint_path.mkdir(parents=True, exist_ok=True)
-        path = self.checkpoint_path / f"checkpoint_{len(self.score_history)}.pth"
+        path = self.checkpoint_path / f"checkpoint_{self.steps_taken}.pth"
         state = {
             'memory': self.memory,
             'score_history': self.score_history,
@@ -315,9 +339,6 @@ class SupaDQN:
         fig, ax = plt.subplots()
         plot(ax, self.score_history)
         fig.savefig(path.with_suffix(".png"))
-
-        self.tb_writer.add_hparams(self.params, { "hparams/avg_score": sum(self.score_history[-10:]) / 10 }, run_name=f"{self.experiment_name}_{len(self.score_history)}")
-        self.tb_writer.flush()
 
     def load_checkpoint(self, path=None):
         if path is None:
