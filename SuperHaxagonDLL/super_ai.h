@@ -37,7 +37,8 @@ namespace super_ai {
 
     /* Use Deep Q-learning to get the moving direction. */
     int get_move_dqn(SuperStruct* super, bool learning);
-
+    /* For debugging, dump the game state to a file. */
+    void dump_game_state_dqn(SuperStruct* super, int action);
 
     // Call this when training the agent and it dies.
     void report_death(SuperStruct* super);

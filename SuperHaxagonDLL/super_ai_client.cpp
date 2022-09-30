@@ -175,3 +175,21 @@ int super_ai::get_move_dqn(SuperStruct * super, bool learning)
     int action = client->request_action(game_state);
     return action;
 }
+
+void super_ai::dump_game_state_dqn(SuperStruct * super, int action)
+{
+    if (!super->is_player_alive())
+        return;
+
+    GameState_DQN game_state = {};
+    get_game_state_dqn(super, &game_state);
+
+    float* game_state_f = (float*)(&game_state);
+    int n_floats = 6 * 2 + 1 + 3 + 6 + 1;
+    FILE* file = fopen("game_state_dqn.txt", "a");
+    for (int i = 0; i < n_floats; ++i) {
+        fprintf(file, "%f ", game_state_f[i]);
+    }
+    fprintf(file, "\n%d\n", action);
+    fclose(file);
+}
