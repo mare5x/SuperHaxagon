@@ -84,7 +84,7 @@ class DQNServer:
         self.model = qlearning.SupaDQN()
 
     def process_msg(self, msg):
-        GameState_unpack = f"{6*2 + 1 + 3 + 6 + 1}f"
+        GameState_unpack = f"{qlearning.INPUT_SIZE}f"
         msg_type = MSG_CODES[struct.unpack('=i', msg[:4])[0]]
         reply = struct.pack("i", 0)
         if msg_type == "DQN_STATE_ACTION":

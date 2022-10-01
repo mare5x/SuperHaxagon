@@ -72,8 +72,8 @@ void process_walls(SuperStruct* super, float walls[6][2])
 	const size_t _DIST = 0;
 	const size_t _WIDTH = 1;
 
+    // Normalize width and height using same units
 	const float max_dist = 5432;
-	const float max_width = 2400;  // I don't actually know, just a guess ...
 
 	for (int i = 0; i < 6; ++i) {
 		walls[i][_DIST] = max_dist;
@@ -86,6 +86,10 @@ void process_walls(SuperStruct* super, float walls[6][2])
 		int slot = wall.slot;
 		int dist = wall.distance;
 		int width = wall.width;
+        
+        // False positives (the player can safely move on such slots)
+        if (dist + width < 167)
+            continue;
 
 		if (dist < walls[slot][_DIST]) {
 			walls[slot][_DIST] = dist;
@@ -96,8 +100,14 @@ void process_walls(SuperStruct* super, float walls[6][2])
 	// Normalize the values.
 	for (int i = 0; i < 6; ++i) {
 		walls[i][_DIST] = clamp(walls[i][_DIST] / max_dist, 0.0f, 1.0f);
-		walls[i][_WIDTH] = clamp(walls[i][_WIDTH] / max_width, 0.0f, 1.0f);
+		walls[i][_WIDTH] = clamp(walls[i][_WIDTH] / max_dist, 0.0f, 1.0f);
 	}
+
+    // Keep only as many walls as there are slots
+    for (int i = super->get_slots(); i < 6; ++i) {
+        walls[i][_DIST] = 0.0f;
+        walls[i][_WIDTH] = 0.0f;
+    }
 }
 
 void get_game_state_dagger(SuperStruct* super, GameState_DAGGER* game_state) 
@@ -124,6 +134,7 @@ void get_game_state_dqn(SuperStruct* super, GameState_DQN* game_state)
     }
 
     game_state->player_pos = super->get_player_rotation() / 360.0f;
+    game_state->spin_direction = super->is_world_moving_clockwise() ? -1 : 1;
 }
 
 void super_ai::init()
@@ -185,7 +196,7 @@ void super_ai::dump_game_state_dqn(SuperStruct * super, int action)
     get_game_state_dqn(super, &game_state);
 
     float* game_state_f = (float*)(&game_state);
-    int n_floats = 6 * 2 + 1 + 3 + 6 + 1;
+    int n_floats = 6 * 2 + 1 + 3 + 6 + 1 + 1;
     FILE* file = fopen("game_state_dqn.txt", "a");
     for (int i = 0; i < n_floats; ++i) {
         fprintf(file, "%f ", game_state_f[i]);

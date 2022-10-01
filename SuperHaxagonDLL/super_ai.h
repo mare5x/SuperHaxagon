@@ -19,6 +19,7 @@ namespace super_ai {
         float cur_slot[6];  // 1-hot encoding, [i] = 1 if i-th slot taken
 
         float player_pos;  // player angle \in [0,1]
+        float spin_direction;  // 1 or -1
     };
 
     // Calculate new action for the AI every N-th frame.

@@ -8,6 +8,7 @@ import torch.nn as nn
 import numpy as np
 import matplotlib.pyplot as plt 
 from torch.utils.tensorboard import SummaryWriter
+from torch.distributions.categorical import Categorical
 
 from plot import plot_queue, moving_average
 
@@ -25,12 +26,12 @@ def state_to_struct(state: list) -> dict:
     walls = np.array(state[:12]).reshape(6, 2)
     n_slots = state[13:16].index(1) + 4
     cur_slot = next(i for i, x in enumerate(state[16:16+6]) if x > 0)
-    player_pos = state[-1] * 6.0
     return {
         "walls": walls,
         "n_slots": n_slots,
         "cur_slot": cur_slot,
-        "player_pos": player_pos,
+        "player_pos": state[22] * n_slots,
+        "world_rotation": state[23],
     }
 
 def get_cur_wall_dist(state_struct: dict) -> tuple:
@@ -42,14 +43,6 @@ def get_cur_center_offset(state_struct: dict) -> float:
     pos = state_struct["player_pos"] * state_struct["n_slots"] 
     return (pos % 1.0) * 2.0 - 1.0
 
-def plot_state(ax, state):
-    # walls array as structured in the C++ code
-    walls = np.array(state[:12]).reshape(6, 2)
-    ax.set_ylim(0, 1.5)
-    ax.bar(list(range(6)), height=walls[:,1], bottom=walls[:,0], width=1.0, align='edge')
-    ax.bar(list(range(6)), height=state[16:16+6], bottom=0, width=1.0, align='edge', alpha=0.5)  # Current player slot
-    ax.plot(state[-1] * 6.0, 0, 'ro')  # Player position
-
 def latest_checkpoint(path):
     checkpoints = list(path.glob("checkpoint_*.pth"))
     if len(checkpoints) > 0:
@@ -60,7 +53,7 @@ def latest_checkpoint(path):
     return None 
 
 
-INPUT_SIZE = 6*2 + 1 + 3 + 6 + 1
+INPUT_SIZE = 6*2 + 1 + 3 + 6 + 1 + 1
 OUT_SIZE = 3
 
 class SupaNet(nn.Module):
@@ -100,7 +93,6 @@ class ReplayMemory:
 
         item = Transition(*args)
         if self.filter_strategy == "none":
-            update_count(item)
             self.memory.append(item)
         elif self.filter_strategy == "keepone":
             if self.replay_counts[item] < 1:
@@ -135,31 +127,33 @@ class ReplayMemory:
         return repr(self.memory)
 
 class SupaDQN:
-    def __init__(self, experiment_name="exp22"):
+    def __init__(self, experiment_name="exp29"):
         self.experiment_name = experiment_name
 
         ### Hyperparams
         self.params = {
-            "nn_sizes": [64, 32, 16],  # Number of neurons in hidden layers
-            "eps_start": 0.5,      # Exploration rate
+            "nn_sizes": [64, 64],  # Number of neurons in hidden layers
+            "eps_start": 0.95,      # Exploration rate
             "eps_end": 0.001,
-            "eps_decay": 20000,
+            "eps_decay": 100000,
             "eps_restart": False,    # Restart exploration after this many steps
             "eps_restart_steps": 500_000,
-            "target_update": 1000,   # Update target_net to policy_net every this many steps.
-            "gamma": 0.91,          # Reward decay rate !!!!!!!!!!!
-            "memory_size": 20000,   # Approx. 10 minutes of gameplay
+            "target_update": 200,   # Update target_net to policy_net every this many steps.
+            "gamma": 0.99,          # Reward decay rate !!!!!!!!!!!
+            "deterministic_actions": True,
+            "memory_size": 100000,   # Approx. 10 minutes of gameplay
             "memory_sample_strategy": "uniform",  # Memory sampling strategy
-            "memory_filter_strategy": "keepone",
-            "batch_size": 8,        # Take this many samples from memory for each optimization batch
+            "memory_filter_strategy": "none",
+            "batch_size": 128,        # Take this many samples from memory for each optimization batch
             "batch_iterations": 2,  # How many training optimization iterations to make for each step
             "reward_slot_center": True,  # Receive reward for being close to the center of a slot
-            "reward_slot_center_amount": 0.2,
+            "reward_slot_center_amount": 0.1,
             "reward_far_wall": True,  # Receive reward for being on a slot where the wall is far away
+            "reward_far_wall_amount": 0.5,
             "reward_interval": 60,  # Receive interval_reward reward after this many successful steps
             "interval_reward": 0,
-            "default_reward": 0.01,  # Receive reward each step
-            "loss_reward": -2,      # Reward when game over
+            "default_reward": 0.1,  # Receive reward each step
+            "loss_reward": -1,      # Reward when game over
         }
         for param, value in self.params.items():
             setattr(self, param, value)
@@ -176,7 +170,7 @@ class SupaDQN:
         self.target_net.eval()
 
         self.optimizer = torch.optim.Adam(self.policy_net.parameters())
-        self.criterion = torch.nn.MSELoss()  # TODO: Try huber, mse, l1, ...
+        self.criterion = torch.nn.SmoothL1Loss()
 
         self.state = None
         self.action = 0
@@ -185,6 +179,7 @@ class SupaDQN:
             sample_strategy=self.memory_sample_strategy, filter_strategy=self.memory_filter_strategy)
         self.steps_taken = 0
         self.frame_number = 0  # Frame number in episode
+        self.reward_in_episode = []
 
         self.is_learning = False 
         self.score_history = []
@@ -206,6 +201,7 @@ class SupaDQN:
         self.action = 0
         self.reward = 0
         self.frame_number = 0
+        self.reward_in_episode = []
 
     def exploration_rate(self, t):
         if self.eps_restart:
@@ -218,7 +214,12 @@ class SupaDQN:
             if torch.rand(1) < self.exploration_rate(self.steps_taken):
                 return random.randrange(0, 3)
         with torch.no_grad():
-            return self.policy_net(state).argmax().item()
+            logits = self.policy_net(state)
+        if self.is_learning and not self.deterministic_actions:
+            m = Categorical(logits=logits)
+            return m.sample().item()
+        else:
+            return logits.argmax().item()
 
     def optimize(self):
         if len(self.memory) < self.batch_size:
@@ -241,9 +242,10 @@ class SupaDQN:
                 next_state_Vs[non_final_mask] = self.target_net(non_final_next_states).detach().max(1)[0].view(-1, 1)
             target_Qs = (next_state_Vs * self.gamma) + rewards 
 
-            self.optimizer.zero_grad()
             loss = self.criterion(model_Qs, target_Qs)
+            self.optimizer.zero_grad()
             loss.backward()
+            torch.nn.utils.clip_grad_norm_(self.policy_net.parameters(), 10)
             self.optimizer.step()
 
             # self.tb_writer.add_scalar("Loss", loss, self.steps_taken)
@@ -281,6 +283,8 @@ class SupaDQN:
             action = self.step(None, reward, done=True)
             plot_queue.put((plot, self.score_history))
 
+            self.tb_writer.add_scalar("Reward/Mean reward per episode", np.mean(self.reward_in_episode), len(self.score_history))
+            self.tb_writer.add_scalar("Reward/Total reward per episode", np.sum(self.reward_in_episode), len(self.score_history))
             self.tb_writer.add_scalar("Exploration rate", self.exploration_rate(self.steps_taken), self.steps_taken)
             self.tb_writer.add_scalar("Memory size", len(self.memory.memory), self.steps_taken)
             self.tb_writer.add_scalar("Score/Score vs step", score, self.steps_taken)
@@ -305,9 +309,11 @@ class SupaDQN:
                 reward += self.reward_slot_center_amount * pow(1 - abs(center_offset), 4)
             if self.reward_far_wall:
                 wall_dist, wall_width = get_cur_wall_dist(state_struct)
-                p = (0.9245396553821594, 0.24907641877394124, -0.5016171990847569)
-                reward += p[0] * pow(wall_dist, p[1]) + p[2]
+                reward += self.reward_far_wall_amount * wall_dist
+
             action = self.step(state, float(reward), done=False)
+
+            self.reward_in_episode.append(reward)
 
             if self.checkpoint_enabled and self.steps_taken % self.checkpoint_update_interval == 0:
                 self.save_checkpoint()
@@ -339,6 +345,7 @@ class SupaDQN:
         fig, ax = plt.subplots()
         plot(ax, self.score_history)
         fig.savefig(path.with_suffix(".png"))
+        plt.close(fig)
 
     def load_checkpoint(self, path=None):
         if path is None:
