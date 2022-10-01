@@ -22,7 +22,9 @@ def plot(ax, data):
 class DAGGER:
     """Imitation learning: DAGGER algorithm using Random Forests for action classification."""
     
-    MODEL_FPATH = "dagger.gz"
+    MODEL_FPATH = "dagger_model.gz"
+    DATA_FPATH = "dagger_data.gz"
+    dump_data = True
 
     def __init__(self):
         self.model = RandomForestClassifier()
@@ -44,20 +46,19 @@ class DAGGER:
     @classmethod
     def load(cls):
         inst = cls()
-        p = pathlib.Path(cls.MODEL_FPATH)
-        if p.exists():
-            print(f"Loading {cls} from {cls.MODEL_FPATH} ...")
-            data = joblib.load(cls.MODEL_FPATH)
-            for k, v in data.items():
-                setattr(inst, k, v)
-            return inst
-        else:
-            return inst
+        paths = [pathlib.Path(cls.MODEL_FPATH), pathlib.Path(cls.DATA_FPATH)]
+        for p in paths:
+            if p.exists():
+                print(f"Loading {cls} from {p} ...")
+                data = joblib.load(p)
+                for k, v in data.items():
+                    setattr(inst, k, v)
+        return inst
 
     def write(self):
         print(f"Writing to {self.MODEL_FPATH} ...")
+        model = { 'model': self.model }
         data = { 
-            'model': self.model,
             'X_train': self.X_train,
             'y_train': self.y_train,
             'X_test': self.X_test,
@@ -66,7 +67,9 @@ class DAGGER:
             'data_in_iteration': self.data_in_iteration,
             'score_history': self.score_history
         }
-        joblib.dump(data, self.MODEL_FPATH)
+        joblib.dump(model, self.MODEL_FPATH)
+        if self.dump_data:
+            joblib.dump(data, self.DATA_FPATH)
 
     def train_model(self):
         X = np.array(self.X_train)
@@ -97,7 +100,7 @@ class DAGGER:
         # The expert action is passed along with the state from the 'server'.
         if expert_action is not None:
             self.store_experience(state, expert_action)
-            if self.iteration == 0:
+            if self.iteration == 0 and self.data_in_iteration < self.DATA_PER_ITERATION:
                 return expert_action
         try:
             state = np.array(state).reshape(1, -1)  # Model requires 2D array
