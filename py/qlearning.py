@@ -127,7 +127,7 @@ class ReplayMemory:
         return repr(self.memory)
 
 class SupaDQN:
-    def __init__(self, experiment_name="exp29"):
+    def __init__(self, experiment_name="exp30"):
         self.experiment_name = experiment_name
 
         ### Hyperparams

@@ -49,7 +49,7 @@ class DAGGER:
         paths = [pathlib.Path(cls.MODEL_FPATH), pathlib.Path(cls.DATA_FPATH)]
         for p in paths:
             if p.exists():
-                print(f"Loading {cls} from {p} ...")
+                print(f"Loading {p} ...")
                 data = joblib.load(p)
                 for k, v in data.items():
                     setattr(inst, k, v)

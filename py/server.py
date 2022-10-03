@@ -8,6 +8,7 @@ import struct
 
 import dagger
 import qlearning 
+import sb3_rl
 import plot
 
 import zmq
@@ -81,7 +82,8 @@ class DAGGERServer:
 
 class DQNServer:
     def __init__(self):
-        self.model = qlearning.SupaDQN()
+        # self.model = qlearning.SupaDQN()
+        self.model = sb3_rl.SupaSB3()
 
     def process_msg(self, msg):
         GameState_unpack = f"{qlearning.INPUT_SIZE}f"
@@ -103,6 +105,6 @@ class DQNServer:
 if __name__ == "__main__":
     context = zmq.Context()
     server = SuperServer(context)
-    plot.start_plotting()
+    # plot.start_plotting()
     while True:
         server.listen()
