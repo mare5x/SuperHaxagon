@@ -21,7 +21,8 @@ GymObs = Union[Tuple, Dict, np.ndarray, int]
 env_queue = queue.Queue()  # Input observation
 action_queue = queue.Queue()  # Output action
 
-INPUT_SIZE = 6*2 + 1 + 3 + 6 + 1 + 1
+N_EXTRA_FEATURES = 1
+INPUT_SIZE = 6*2 + 1 + 3 + 6 + 1 + 1 + N_EXTRA_FEATURES
 OUT_SIZE = 3
 
 KYS_FLAG = "kys"
@@ -76,6 +77,10 @@ class SupaEnv(gym.Env):
         :return: the first observation of the episode
         """
         flag, state = get_env_queue()
+        state_struct = self.state_to_struct(state)
+        state_struct = self.add_state_features(state_struct)
+        state = state_struct["_packed"]
+        self.last_state = state
         self.frame_number = 1
         return state
 
@@ -93,38 +98,49 @@ class SupaEnv(gym.Env):
             reward = self.loss_reward
             done = True
         elif flag == ENV_STATE_FLAG:
+            state_struct = self.state_to_struct(state)
+            state_struct = self.add_state_features(state_struct)
+            state = state_struct["_packed"]
             self.last_state = state
             self.frame_number += 1
-
-            reward = self.get_reward(state)
+            reward = self.get_reward(state_struct)
             done = False
         else:
             raise ValueError(f"Unknown flag {flag}")
         info = {}
         return state, reward, done, info
 
-    def get_reward(self, state):
+    def get_reward(self, state_struct: dict) -> float:
         reward = self.default_reward
         # Reward shaping
         if self.frame_number % self.reward_interval == 0:
             reward += self.interval_reward
-        state_struct = self.state_to_struct(state)
         if self.reward_slot_center:
-            center_offset = self.get_cur_center_offset(state_struct)
-            reward += self.reward_slot_center_amount * pow(1 - abs(center_offset), 4)
+            reward += self.reward_slot_center_amount * pow(1 - abs(state_struct["center_offset"]), 4)
         if self.reward_far_wall:
             wall_dist, wall_width = self.get_cur_wall_dist(state_struct)
             reward += self.reward_far_wall_amount * wall_dist
         return reward
 
     @staticmethod
+    def add_state_features(state_struct: dict) -> dict:
+        # Add extra features to the input
+        center_offset = SupaEnv.get_cur_center_offset(state_struct)
+        state_struct["center_offset"] = center_offset
+        state_struct["_packed"].append(center_offset)
+        return state_struct
+
+    @staticmethod
     def state_to_struct(state: list) -> dict:
         # This function must be defined based on the C++ GameState_DQN struct.
         walls = np.array(state[:12]).reshape(6, 2)
+        wall_speed = state[12]
         n_slots = state[13:16].index(1) + 4
         cur_slot = next(i for i, x in enumerate(state[16:16+6]) if x > 0)
         return {
+            "_packed": state,
             "walls": walls,
+            "wall_speed": wall_speed,
             "n_slots": n_slots,
             "cur_slot": cur_slot,
             "player_pos": state[22] * n_slots,
@@ -199,20 +215,20 @@ class CheckpointWithEnvCallback(CheckpointCallback):
 
 
 class SupaSB3:
-    def __init__(self, experiment_name="sb3_0"):
+    def __init__(self, experiment_name="sb3_3"):
         self.experiment_name = experiment_name
 
         sb3_params = dict(
             train_freq=16,
-            gradient_steps=8,
+            gradient_steps=-1,
             gamma=0.99,
-            exploration_fraction=0.2,
-            exploration_final_eps=0.07,
-            target_update_interval=600,
-            learning_starts=1000,
-            buffer_size=10000,
+            exploration_fraction=0.1,
+            exploration_final_eps=0.005,
+            target_update_interval=300,
+            learning_starts=100,
+            buffer_size=100_000,
             batch_size=128,
-            learning_rate=4e-3,
+            learning_rate=6.3e-4,
             policy_kwargs=dict(net_arch=[256, 256])
         )
 
@@ -254,21 +270,22 @@ class SupaSB3:
 
     def get_action(self, state):
         action = None
+        env_queue.put((ENV_STATE_FLAG, state))
         if self.learn_thread and self.learn_thread.is_alive():
-            env_queue.put((ENV_STATE_FLAG, state))
             try:
                 action = action_queue.get(timeout=15)
             except queue.Empty:
                 # This should happen only when the total timesteps is reached (learning has stopped)
                 print("action_queue timeout")
         if action is None:
+            state = self.env.reset()
             action, _ = self.model.predict(state, deterministic=True)
         return self.actions_tr[action]
 
     def set_is_learning(self, is_learning):
         def learn_worker():
             self.model.learn(
-                total_timesteps=100000,
+                total_timesteps=1_000_000, 
                 log_interval=10,  # Log every n episodes 
                 reset_num_timesteps=False, 
                 callback=self.callbacks)
