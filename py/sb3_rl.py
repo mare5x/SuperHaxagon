@@ -21,7 +21,7 @@ GymObs = Union[Tuple, Dict, np.ndarray, int]
 env_queue = queue.Queue()  # Input observation
 action_queue = queue.Queue()  # Output action
 
-N_EXTRA_FEATURES = 1
+N_EXTRA_FEATURES = 1 + 2
 INPUT_SIZE = 6*2 + 1 + 3 + 6 + 1 + 1 + N_EXTRA_FEATURES
 OUT_SIZE = 3
 
@@ -128,6 +128,11 @@ class SupaEnv(gym.Env):
         center_offset = SupaEnv.get_cur_center_offset(state_struct)
         state_struct["center_offset"] = center_offset
         state_struct["_packed"].append(center_offset)
+        phi = state_struct["player_pos"] / state_struct["n_slots"] * 2 * np.pi
+        state_struct["pos_x"] = np.cos(phi)
+        state_struct["pos_y"] = np.sin(phi)
+        state_struct["_packed"].append(state_struct["pos_x"])
+        state_struct["_packed"].append(state_struct["pos_y"])
         return state_struct
 
     @staticmethod
@@ -166,7 +171,10 @@ class TensorboardCallback(BaseCallback):
         self.tb_formatter = next(formatter for formatter in output_formats if isinstance(formatter, TensorBoardOutputFormat))
 
         # TODO https://stable-baselines3.readthedocs.io/en/master/guide/tensorboard.html#logging-hyperparameters
-        # self.tb_formatter.writer.add_text("params", str(self.model._hparams), self.steps_taken)
+        env_params = self.training_env.get_attr("hparams")[0]
+        model_params = self.model._hparams
+        self.tb_formatter.writer.add_text("params/model", str(model_params), self.num_timesteps)
+        self.tb_formatter.writer.add_text("params/env", str(env_params), self.num_timesteps)
 
     def _on_step(self) -> bool:
         is_episode_done = self.locals["dones"][0]
@@ -215,14 +223,14 @@ class CheckpointWithEnvCallback(CheckpointCallback):
 
 
 class SupaSB3:
-    def __init__(self, experiment_name="sb3_3"):
+    def __init__(self, experiment_name="sb3_5"):
         self.experiment_name = experiment_name
 
         sb3_params = dict(
             train_freq=16,
-            gradient_steps=-1,
-            gamma=0.99,
-            exploration_fraction=0.1,
+            gradient_steps=10,
+            gamma=0.95,
+            exploration_fraction=0.05,
             exploration_final_eps=0.005,
             target_update_interval=300,
             learning_starts=100,
@@ -262,6 +270,7 @@ class SupaSB3:
                 verbose=2,
                 tensorboard_log=f"runs/{self.experiment_name}",
                 seed=42)
+            self.model._hparams = sb3_params  # Store params for easy logging and saving
         self.learn_thread = None 
 
     def on_episode_end(self, score=None):
