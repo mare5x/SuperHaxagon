@@ -8,7 +8,7 @@ import gym
 import numpy as np
 import matplotlib.pyplot as plt
 
-from stable_baselines3 import DQN
+from stable_baselines3 import DQN, PPO
 from stable_baselines3.common.callbacks import BaseCallback, CheckpointCallback, EveryNTimesteps
 from stable_baselines3.common.logger import TensorBoardOutputFormat
 
@@ -50,6 +50,7 @@ def get_env_queue():
 
 
 class SupaEnv(gym.Env):
+    # TODO use rl_zoo3 frame skipping wrapper
     def __init__(self):
         super(SupaEnv, self).__init__()
         self.observation_space = gym.spaces.Box(low=-np.inf, high=np.inf, shape=(INPUT_SIZE,))
@@ -164,6 +165,51 @@ class SupaEnv(gym.Env):
         return (pos % 1.0) * 2.0 - 1.0
 
 
+# Adapted from https://github.com/DLR-RM/rl-baselines3-zoo/blob/master/rl_zoo3/wrappers.py
+class HistoryWrapper(gym.Wrapper):
+    """
+    Stack past observations and actions to give an history to the agent.
+    :param env:
+    :param horizon:Number of steps to keep in the history.
+    """
+
+    def __init__(self, env: gym.Env, horizon: int = 2):
+        # Overwrite the observation space
+        input_size = INPUT_SIZE + (INPUT_SIZE + 1) * horizon
+        env.observation_space = gym.spaces.Box(low=-np.inf, high=np.inf, shape=(input_size,))
+        
+        super().__init__(env)
+
+        self.horizon = horizon
+        self.obs_history = np.zeros(INPUT_SIZE * (horizon + 1))
+        self.action_history = np.zeros(horizon)
+
+    def _create_obs_from_history(self):
+        return np.concatenate((self.obs_history, self.action_history))
+
+    def reset(self):
+        # Flush the history
+        self.obs_history[...] = 0
+        self.action_history[...] = 0
+        obs = self.env.reset()
+        obs = np.array(obs)
+        self.obs_history[..., -obs.shape[-1] :] = obs
+        return self._create_obs_from_history()
+
+    def step(self, action):
+        obs, reward, done, info = self.env.step(action)
+        obs = np.array(obs)
+        action = np.array(action)
+        last_ax_size = obs.shape[-1]
+
+        self.obs_history = np.roll(self.obs_history, shift=-last_ax_size, axis=-1)
+        self.obs_history[..., -obs.shape[-1] :] = obs
+
+        self.action_history = np.roll(self.action_history, shift=-1, axis=-1)
+        self.action_history[..., -1:] = action
+        return self._create_obs_from_history(), reward, done, info
+
+
 class TensorboardCallback(BaseCallback):
     def _on_training_start(self):
         # Save reference to tensorboard formatter object
@@ -223,22 +269,34 @@ class CheckpointWithEnvCallback(CheckpointCallback):
 
 
 class SupaSB3:
-    def __init__(self, experiment_name="sb3_5"):
+    def __init__(self, experiment_name="sb3_9"):
         self.experiment_name = experiment_name
 
         sb3_params = dict(
             train_freq=16,
-            gradient_steps=10,
-            gamma=0.95,
+            gradient_steps=32,
+            gamma=0.96,
             exploration_fraction=0.05,
             exploration_final_eps=0.005,
-            target_update_interval=300,
+            target_update_interval=100,
             learning_starts=100,
             buffer_size=100_000,
             batch_size=128,
             learning_rate=6.3e-4,
             policy_kwargs=dict(net_arch=[256, 256])
         )
+        # PPO
+        # sb3_params = dict(
+        #     n_steps = 1024,
+        #     batch_size = 64,
+        #     gae_lambda = 0.98,
+        #     gamma = 0.95,
+        #     n_epochs = 4,
+        #     ent_coef = 0.01,
+        # )
+
+        self.total_timesteps = 500_000
+        self.horizon = 1  # Stack this many states into one
 
         # The model works with indices [0, 3), but the server expects [-1,0,1].
         self.actions_tr = [-1, 0, 1]  # Map action index to action
@@ -262,7 +320,8 @@ class SupaSB3:
             save_plot_callback
         ]
 
-        self.env = SupaEnv()
+        env = SupaEnv()
+        self.env = HistoryWrapper(env, horizon=self.horizon)
         if not self.load_checkpoint(checkpoint_path):
             self.model = DQN("MlpPolicy",
                 self.env,
@@ -270,12 +329,23 @@ class SupaSB3:
                 verbose=2,
                 tensorboard_log=f"runs/{self.experiment_name}",
                 seed=42)
+            # self.model = PPO(
+            #     "MlpPolicy",
+            #     self.env,
+            #     **sb3_params,
+            #     verbose=2,
+            #     tensorboard_log=f"runs/{self.experiment_name}",
+            #     seed=42
+            # )
             self.model._hparams = sb3_params  # Store params for easy logging and saving
         self.learn_thread = None 
+
+        self.last_action = None
 
     def on_episode_end(self, score=None):
         if self.learn_thread and self.learn_thread.is_alive():
             env_queue.put((GAME_OVER_FLAG, score))
+        self.last_action = None
 
     def get_action(self, state):
         action = None
@@ -285,16 +355,23 @@ class SupaSB3:
                 action = action_queue.get(timeout=15)
             except queue.Empty:
                 # This should happen only when the total timesteps is reached (learning has stopped)
-                print("action_queue timeout")
-        if action is None:
-            state = self.env.reset()
+                print("action_queue timeout")        
+        if action is None:  # When not learning 
+            if self.last_action is None:
+                state = self.env.reset()
+            else:
+                state, *_ = self.env.step(self.last_action)
+                action_queue.get()  # Empty out the queue (== self.last_action)
             action, _ = self.model.predict(state, deterministic=True)
-        return self.actions_tr[action]
+        
+        self.last_action = action
+        action = self.actions_tr[action]
+        return action
 
     def set_is_learning(self, is_learning):
         def learn_worker():
             self.model.learn(
-                total_timesteps=1_000_000, 
+                total_timesteps=self.total_timesteps - self.model.num_timesteps, 
                 log_interval=10,  # Log every n episodes 
                 reset_num_timesteps=False, 
                 callback=self.callbacks)
@@ -319,6 +396,7 @@ class SupaSB3:
 
         model_path, replay_buffer_path = path
         self.model = DQN.load(model_path, env=self.env, print_system_info=True)
+        # self.model = PPO.load(model_path, env=self.env, print_system_info=True)
         if replay_buffer_path:
             self.model.load_replay_buffer(replay_buffer_path)
 
