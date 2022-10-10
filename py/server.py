@@ -33,7 +33,8 @@ class SuperServer:
         self.socket.bind("tcp://*:5555")
 
         self.dagger = DAGGERServer()
-        self.dqn = DQNServer()
+        # self.dqn = DQNServer()
+        self.dqn = SB3OptunaServer()
 
         self.current_server = None
 
@@ -84,6 +85,27 @@ class DQNServer:
     def __init__(self):
         # self.model = qlearning.SupaDQN()
         self.model = sb3_rl.SupaSB3()
+
+    def process_msg(self, msg):
+        GameState_unpack = f"{qlearning.INPUT_SIZE}f"
+        msg_type = MSG_CODES[struct.unpack('=i', msg[:4])[0]]
+        reply = struct.pack("i", 0)
+        if msg_type == "DQN_STATE_ACTION":
+            _, *state = struct.unpack(f"i{GameState_unpack}", msg)
+            action = self.model.get_action(state)
+            reply = struct.pack("i", action)
+        elif msg_type == "EPISODE_SCORE":
+            _, score = struct.unpack("ii", msg)
+            self.model.on_episode_end(score)
+        elif msg_type == "DQN_LEARNING_MODE":
+            _, mode = struct.unpack("ii", msg)
+            self.model.set_is_learning(mode == 1)
+        return reply
+
+
+class SB3OptunaServer:
+    def __init__(self):
+        self.model = sb3_rl.SupaSB3Optuna()
 
     def process_msg(self, msg):
         GameState_unpack = f"{qlearning.INPUT_SIZE}f"

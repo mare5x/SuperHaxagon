@@ -1,4 +1,5 @@
 import pathlib
+import pickle
 import sys
 import queue
 import threading
@@ -51,7 +52,7 @@ def get_env_queue():
 
 class SupaEnv(gym.Env):
     # TODO use rl_zoo3 frame skipping wrapper
-    def __init__(self):
+    def __init__(self, hparams: dict = None):
         super(SupaEnv, self).__init__()
         self.observation_space = gym.spaces.Box(low=-np.inf, high=np.inf, shape=(INPUT_SIZE,))
         self.action_space = gym.spaces.Discrete(OUT_SIZE)
@@ -68,6 +69,8 @@ class SupaEnv(gym.Env):
             "default_reward": 0.1,  # Receive reward each step
             "loss_reward": -1,      # Reward when game over
         }
+        if hparams:
+            self.hparams.update(hparams)
         for attr, value in self.hparams.items():
             setattr(self, attr, value)
         self.frame_number = 0
@@ -174,6 +177,8 @@ class HistoryWrapper(gym.Wrapper):
     """
 
     def __init__(self, env: gym.Env, horizon: int = 2):
+        horizon = env.hparams.get("horizon", horizon)
+        
         # Overwrite the observation space
         input_size = INPUT_SIZE + (INPUT_SIZE + 1) * horizon
         env.observation_space = gym.spaces.Box(low=-np.inf, high=np.inf, shape=(input_size,))
@@ -405,4 +410,227 @@ class SupaSB3:
         self.env.hparams = self.model._env_hparams
 
         return True 
+
+
+
+import optuna
+import optuna.visualization as opt_vis
+
+
+class OptunaTrialCallback(BaseCallback):
+    def __init__(self, trial: optuna.Trial, eval_freq: int, verbose: int = 0):
+        super().__init__(verbose)
+
+        self.eval_freq = eval_freq
+        self.trial = trial
+        self.last_n_mean = 50
+        
+        self.is_pruned = False
+
+    def _on_step(self) -> bool:
+        # if self.num_timesteps > 40_000:
+        #     # Prune if the run is absolute garbage (worse than random)
+        #     scores = self.training_env.get_attr("real_episode_scores")[0]
+        #     score = np.median(scores[-min(len(scores), self.last_n_mean):])
+        #     if score < 3 * 60:
+        #         self.is_pruned = True
+        #         return False
+        if self.num_timesteps % self.eval_freq == 0:
+            scores = self.training_env.get_attr("real_episode_scores")[0]
+            score = np.median(scores[-min(len(scores), self.last_n_mean):])
+            self.trial.report(score, self.num_timesteps)
+            if self.trial.should_prune():
+                self.is_pruned = True
+                return False
+        return True
+
+
+def sample_dqn_params(trial: optuna.Trial) -> Dict[str, Any]:
+    gamma = trial.suggest_categorical("gamma", [0.9, 0.95, 0.97, 0.99])
+    learning_rate = trial.suggest_float("learning_rate", 1e-5, 1, log=True)
+    # batch_size = trial.suggest_categorical("batch_size", [16, 32, 64, 128, 256, 512])
+    batch_size = 64
+    # buffer_size = trial.suggest_categorical("buffer_size", [int(1e4), int(5e4), int(1e5)])
+    buffer_size = 100_000
+
+    exploration_final_eps = trial.suggest_float("exploration_final_eps", 0, 0.1)
+    exploration_fraction = trial.suggest_float("exploration_fraction", 0, 0.5)
+    target_update_interval = trial.suggest_categorical("target_update_interval", [300, 1000, 5000])
+
+    # train_freq = trial.suggest_categorical("train_freq", [1, 8, 16])
+    # subsample_steps = trial.suggest_categorical("subsample_steps", [1, 2])
+    # gradient_steps = max(train_freq // subsample_steps, 1)
+    train_freq = 8
+    gradient_steps = -1
+
+    net_arch = trial.suggest_categorical("net_arch", ["tiny", "small", "medium"])
+    net_arch = {"tiny": [64], "small": [64, 64], "medium": [256, 256]}[net_arch]
+
+    hyperparams = {
+        "gamma": gamma,
+        "learning_rate": learning_rate,
+        "batch_size": batch_size,
+        "buffer_size": buffer_size,
+        "train_freq": train_freq,
+        "gradient_steps": gradient_steps,
+        "exploration_fraction": exploration_fraction,
+        "exploration_final_eps": exploration_final_eps,
+        "target_update_interval": target_update_interval,
+        "learning_starts": 100,
+        "policy_kwargs": dict(net_arch=net_arch),
+    }
+    return hyperparams
+
+
+def sample_env_params(trial: optuna.Trial) -> Dict[str, Any]:
+    reward_slot_center_amount = trial.suggest_float("reward_slot_center_amount", 0, 1)
+    reward_far_wall_amount = trial.suggest_float("reward_far_wall_amount", 0, 1)
+    # default_reward = trial.suggest_float("default_reward", 0, 1)
+    default_reward = 0.1
+    horizon = trial.suggest_categorical("horizon", [0, 1, 2])
+    # horizon = 2
+
+    hyperparams = {
+        "reward_slot_center": True,  # Receive reward for being close to the center of a slot
+        "reward_slot_center_amount": reward_slot_center_amount,
+        "reward_far_wall": True,  # Receive reward for being on a slot where the wall is far away
+        "reward_far_wall_amount": reward_far_wall_amount,
+        "reward_interval": 60,  # Receive interval_reward reward after this many successful steps
+        "interval_reward": 0,
+        "default_reward": default_reward,  # Receive reward each step
+        "loss_reward": -1,      # Reward when game over
+        "horizon": horizon,  # Stack this many previous states together
+    }
+    return hyperparams
+
+
+class SupaSB3Optuna:
+    def __init__(self, experiment_name="sb3_optuna_13"):
+        self.experiment_name = experiment_name
+
+        self.n_trials = 50
+        self.n_startup_trials = 3  # Pruning is disabled until the given number of trials finish in the same study.
+        self.eval_freq = 2000  # Report metrics to pruner every this many steps
+        self.total_timesteps = 100_000
+        self.n_warmup_steps = int(self.total_timesteps * 0.3)  # Do not prune before % of the max budget is used
+
+        # The model works with indices [0, 3), but the server expects [-1,0,1].
+        self.actions_tr = [-1, 0, 1]  # Map action index to action
+        self.actions_tr_inv = { v: i for i, v in enumerate(self.actions_tr) }
+
+        # A seperate thread is used for listening to C++ requests and for optimization.
+        # Another option would be to make the gym.Env handle server requests instead.
+        self.learn_thread = threading.Thread(target=self.optimize_hyperparameters)
+        self.learn_thread.start()
+
+    def on_episode_end(self, score=None):
+        env_queue.put((GAME_OVER_FLAG, score))
+
+    def get_action(self, state):
+        env_queue.put((ENV_STATE_FLAG, state))
+        try:
+            action = action_queue.get(timeout=10)
+        except queue.Empty:
+            while not env_queue.empty():
+                env_queue.get_nowait()
+            env_queue.put((ENV_STATE_FLAG, state))
+            action = action_queue.get()
+        action = self.actions_tr[action]
+        return action
+
+    def set_is_learning(self, is_learning):
+        return
+
+    def optimize_hyperparameters(self):
+        print("Optimizing hyperparameters...")
+
+        def objective(trial: optuna.Trial):            
+            print(f"Running trial {trial._trial_id} ...")
+
+            env_params = sample_env_params(trial)
+            dqn_params = sample_dqn_params(trial)
+            print(env_params)
+            print(dqn_params)
+
+            env = SupaEnv(hparams=env_params)
+            env = HistoryWrapper(env)
+
+            model = DQN(
+                "MlpPolicy",
+                env,
+                **dqn_params,
+                verbose=2,
+                # tensorboard_log=None,
+                tensorboard_log=f"runs/{self.experiment_name}/{trial._trial_id}",
+                seed=None)
+            model._hparams = dqn_params  # Store params for easy logging and saving
+
+            trial_cb = OptunaTrialCallback(trial, eval_freq=self.eval_freq, verbose=2)
+            callbacks = [
+                TensorboardCallback(),
+                trial_cb
+            ]
+            model.learn(
+                total_timesteps=self.total_timesteps, 
+                log_interval=10,  # Log every n episodes 
+                reset_num_timesteps=False, 
+                callback=callbacks)
+            print("Learning complete!")
+
+            model.save(f"runs/{self.experiment_name}/{trial._trial_id}/model")
+            
+            if trial_cb.is_pruned:
+                print(f"Pruning trial {trial._trial_id}")
+                raise optuna.exceptions.TrialPruned()
+
+            scores = env.env.real_episode_scores
+            score = np.mean(scores[-min(len(scores), trial_cb.last_n_mean):])
+            return score
+
+        sampler = optuna.samplers.TPESampler(n_startup_trials=self.n_startup_trials)
+        pruner = optuna.pruners.MedianPruner(n_startup_trials=self.n_startup_trials, n_warmup_steps=self.n_warmup_steps)
+
+        study = optuna.create_study(sampler=sampler, pruner=pruner, direction="maximize")
+        study.optimize(objective, n_trials=self.n_trials)
+
+        pruned_trials = study.get_trials(deepcopy=False, states=[optuna.trial.TrialState.PRUNED])
+        complete_trials = study.get_trials(deepcopy=False, states=[optuna.trial.TrialState.COMPLETE])
+
+        print("Study statistics: ")
+        print("  Number of finished trials: ", len(study.trials))
+        print("  Number of pruned trials: ", len(pruned_trials))
+        print("  Number of complete trials: ", len(complete_trials))
+
+        print("Best trial:")
+        trial = study.best_trial
+
+        print("  Value: ", trial.value)
+
+        print("  Params: ")
+        for key, value in trial.params.items():
+            print("    {}: {}".format(key, value))
+
+        log_path = f"runs/{self.experiment_name}/report"
+        print(f"Writing report to {log_path}")
+        study.trials_dataframe().to_csv(f"{log_path}.csv")
+
+        # Save python object to inspect/re-use it later
+        with open(f"{log_path}.pkl", "wb+") as f:
+            pickle.dump(study, f)
+
+        # Plot optimization result
+        try:
+            fig1 = opt_vis.plot_optimization_history(study)
+            fig2 = opt_vis.plot_param_importances(study)
+            fig3 = opt_vis.plot_intermediate_values(study)
+            fig4 = opt_vis.plot_parallel_coordinate(study)
+
+            fig1.show()
+            fig2.show()
+            fig3.show()
+            fig4.show()
+        except (ValueError, ImportError, RuntimeError):
+            pass
+
+        print("Done optimizing hyperparameters!")
     
