@@ -3,13 +3,16 @@ import pickle
 import sys
 import queue
 import threading
-from typing import Any, Callable, Dict, List, NamedTuple, Tuple, Union
+from typing import Any, Callable, Dict, List, NamedTuple, Tuple, Union, Optional, Type
 
+import torch
+import torch.nn as nn
 import gym
 import numpy as np
 import matplotlib.pyplot as plt
 
 from stable_baselines3 import DQN, PPO
+from stable_baselines3.dqn.policies import QNetwork, DQNPolicy
 from stable_baselines3.common.callbacks import BaseCallback, CheckpointCallback, EveryNTimesteps
 from stable_baselines3.common.logger import TensorBoardOutputFormat
 
@@ -48,6 +51,58 @@ def get_env_queue():
     if flag == KYS_FLAG:
         return sys.exit()  # Exit the learner thread only
     return flag, value
+
+
+def create_dropout_mlp(
+    input_dim: int,
+    output_dim: int,
+    net_arch: List[int],
+    dropout_arch: List[float],
+    activation_fn: Type[nn.Module] = nn.ReLU,
+    squash_output: bool = False,
+) -> List[nn.Module]:
+    if len(net_arch) > 0:
+        modules = [nn.Linear(input_dim, net_arch[0]), activation_fn(), nn.Dropout(dropout_arch[0])]
+    else:
+        modules = []
+
+    for idx in range(len(net_arch) - 1):
+        modules.append(nn.Linear(net_arch[idx], net_arch[idx + 1]))
+        modules.append(activation_fn())
+        modules.append(nn.Dropout(dropout_arch[idx + 1]))
+
+    if output_dim > 0:
+        last_layer_dim = net_arch[-1] if len(net_arch) > 0 else input_dim
+        modules.append(nn.Linear(last_layer_dim, output_dim))
+    if squash_output:
+        modules.append(nn.Tanh())
+    return modules
+
+class CustomQNetwork(QNetwork):
+    def __init__(
+        self,
+        observation_space: gym.spaces.Space,
+        action_space: gym.spaces.Space,
+        features_extractor: nn.Module,
+        features_dim: int,
+        net_arch: Optional[List[int]] = None,
+        activation_fn: Type[nn.Module] = nn.ReLU,
+        normalize_images: bool = True,
+    ):
+        super().__init__(observation_space, action_space, features_extractor, features_dim, 
+            net_arch=net_arch, activation_fn=activation_fn, normalize_images=normalize_images)
+
+        dropout_arch = [0.097, 0.11]
+        q_net = create_dropout_mlp(self.features_dim, self.action_space.n, [115, 97], dropout_arch, nn.ReLU)
+        # q_net = create_dropout_mlp(self.features_dim, self.action_space.n, self.net_arch, dropout_arch, self.activation_fn)
+        self.q_net = nn.Sequential(*q_net)
+        self.q_net.load_state_dict(torch.load("pretrained.pth"))
+
+class CustomDQNPolicy(DQNPolicy):
+    def make_q_net(self):
+        # Make sure we always have separate networks for features extractors etc
+        net_args = self._update_features_extractor(self.net_args, features_extractor=None)
+        return CustomQNetwork(**net_args).to(self.device)
 
 
 class SupaEnv(gym.Env):
@@ -274,21 +329,21 @@ class CheckpointWithEnvCallback(CheckpointCallback):
 
 
 class SupaSB3:
-    def __init__(self, experiment_name="sb3_9"):
+    def __init__(self, experiment_name="sb3_15"):
         self.experiment_name = experiment_name
 
         sb3_params = dict(
             train_freq=16,
-            gradient_steps=32,
-            gamma=0.96,
-            exploration_fraction=0.05,
+            gradient_steps=16,
+            gamma=0.95,
+            exploration_fraction=0.1,
             exploration_final_eps=0.005,
-            target_update_interval=100,
+            target_update_interval=300,
             learning_starts=100,
             buffer_size=100_000,
             batch_size=128,
             learning_rate=6.3e-4,
-            policy_kwargs=dict(net_arch=[256, 256])
+            policy_kwargs=dict(net_arch=[115, 97])
         )
         # PPO
         # sb3_params = dict(
@@ -300,8 +355,8 @@ class SupaSB3:
         #     ent_coef = 0.01,
         # )
 
-        self.total_timesteps = 500_000
-        self.horizon = 1  # Stack this many states into one
+        self.total_timesteps = 1_000_000
+        self.horizon = 2  # Stack this many states into one
 
         # The model works with indices [0, 3), but the server expects [-1,0,1].
         self.actions_tr = [-1, 0, 1]  # Map action index to action
@@ -328,7 +383,8 @@ class SupaSB3:
         env = SupaEnv()
         self.env = HistoryWrapper(env, horizon=self.horizon)
         if not self.load_checkpoint(checkpoint_path):
-            self.model = DQN("MlpPolicy",
+            self.model = DQN(
+                CustomDQNPolicy, #"MlpPolicy",
                 self.env,
                 **sb3_params,
                 verbose=2,
@@ -505,7 +561,7 @@ def sample_env_params(trial: optuna.Trial) -> Dict[str, Any]:
 
 
 class SupaSB3Optuna:
-    def __init__(self, experiment_name="sb3_optuna_13"):
+    def __init__(self, experiment_name="sb3_optuna_14"):
         self.experiment_name = experiment_name
 
         self.n_trials = 50

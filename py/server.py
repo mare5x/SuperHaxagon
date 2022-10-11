@@ -33,8 +33,8 @@ class SuperServer:
         self.socket.bind("tcp://*:5555")
 
         self.dagger = DAGGERServer()
-        # self.dqn = DQNServer()
-        self.dqn = SB3OptunaServer()
+        self.dqn = DQNServer()
+        # self.dqn = SB3OptunaServer()
 
         self.current_server = None
 
