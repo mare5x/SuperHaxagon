@@ -14,6 +14,9 @@ There are 3 different AI bot implementations that can beat the game.
 A hacky teleportation approach, a natural key emulated approach based on custom heuristics and multiple [reinforcement learning](#reinforcement-learning) approaches.
 
 
+https://user-images.githubusercontent.com/9051689/196054151-f7b7d4ba-7a73-4c3a-8275-ff16a50b2e9a.mp4
+
+
 ## Hooking features
 
  * draw using _OpenGL_ functions,
@@ -32,7 +35,10 @@ The output is one of three actions (left, none, right).
 The C++ code sends the game's state to the Python server which replies back with the appropriate action.
 
 Example of the processed game state:  
-<video src="./figs/dqn_states.mp4" width=300></video>
+
+https://user-images.githubusercontent.com/9051689/196054134-3bd7aaa3-08a6-4f5f-8a4a-bd3f8588980b.mp4
+
+
 
 ### Imitation learning
 
@@ -53,7 +59,7 @@ This allows us to change the used RL algorithm with ease (e.g. using [QR-DQN](ht
 
 [Optuna](https://optuna.org/) is used for hyperparameter optimization.
 
-Comparison of DAgger and QR-DQN:
+Comparison of DAgger and QR-DQN:  
 ![scores](./figs/scores.png)
 
 
