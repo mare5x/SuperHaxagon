@@ -9,28 +9,6 @@ using super_ai::GameState_DAGGER;
 using super_ai::GameState_DQN;
 
 namespace super_ai {
-	// IDEA OUTLINE (behavioral cloning):
-	// Over the course of some time, sample training data to be used for training.
-	// Sample an equal amount of samples for each possible action taken by the ai
-	// (to ensure balanced training).
-	// Store a percentage of the sampled training data to be used for evaluating
-	// the performance of the ann. (That data is not used for training.)
-	// After the training data has been acquired, train the ann and measure the
-	// performance. (Train by using mini batches of sampled training data.)
-	// Continue training until improvement stops. Then start a new game
-	// and repeat the process.
-
-	// It turns out that doing the above outlined process isn't very effective
-	// because it only trains on "perfect" data, i.e. it doesn't know how to
-	// react when it makes a mistake. To fix this, use Direct Policy Learning via 
-	// Interactive demonstrator, which is better in the sense that more training states are
-	// gathered by querying the expert player when mistakes are made.
-
-    // To train the ANN, we must feed it the input states and the resulting outputs.  // The inputs and outputs are observed by playing the game. 
-    // The ANN is fed as input GameStates and it outputs the probability of going
-    // left or right (or nowhere) based on the input in the output neurons.
-    // All inputs and outputs in the ANN are normalized [0, 1].
-
     super_client::SuperClient* client;
 }
 
