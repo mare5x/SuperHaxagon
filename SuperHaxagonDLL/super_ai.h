@@ -24,7 +24,7 @@ namespace super_ai {
 
     // Calculate new action for the AI every N-th frame.
     const int DAGGER_UPDATE_INTERVAL = 2;
-    const int DQN_UPDATE_INTERVAL = 2;
+    const int DQN_UPDATE_INTERVAL = 4;  // THIS IS EXTREMELY IMPORTANT
 
     /** Instantly move the player to the best safe slot in the game. */
     void make_move_instant(SuperStruct* super);

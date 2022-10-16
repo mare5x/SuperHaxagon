@@ -11,6 +11,7 @@ import gym
 import numpy as np
 import matplotlib.pyplot as plt
 
+from sb3_contrib import QRDQN
 from stable_baselines3 import DQN, PPO
 from stable_baselines3.dqn.policies import QNetwork, DQNPolicy
 from stable_baselines3.common.callbacks import BaseCallback, CheckpointCallback, EveryNTimesteps
@@ -115,13 +116,13 @@ class SupaEnv(gym.Env):
         self.last_state = None 
         self.real_episode_scores = []
         self.hparams = {
-            "reward_slot_center": True,  # Receive reward for being close to the center of a slot
-            "reward_slot_center_amount": 0.1,
+            "reward_slot_center": False,  # Receive reward for being close to the center of a slot
+            "reward_slot_center_amount": 0,
             "reward_far_wall": True,  # Receive reward for being on a slot where the wall is far away
-            "reward_far_wall_amount": 0.5,
+            "reward_far_wall_amount": 0.8255774334211466,
             "reward_interval": 60,  # Receive interval_reward reward after this many successful steps
             "interval_reward": 0,
-            "default_reward": 0.1,  # Receive reward each step
+            "default_reward": 0,  # Receive reward each step
             "loss_reward": -1,      # Reward when game over
         }
         if hparams:
@@ -329,21 +330,23 @@ class CheckpointWithEnvCallback(CheckpointCallback):
 
 
 class SupaSB3:
-    def __init__(self, experiment_name="sb3_15"):
+    def __init__(self, experiment_name="sb3_21"):
         self.experiment_name = experiment_name
+        
+        self.model_class = QRDQN  # DQN, PPO
 
         sb3_params = dict(
-            train_freq=16,
-            gradient_steps=16,
-            gamma=0.95,
-            exploration_fraction=0.1,
-            exploration_final_eps=0.005,
-            target_update_interval=300,
-            learning_starts=100,
+            train_freq=8,
+            gradient_steps=-1,
+            gamma=0.99,
+            exploration_fraction=0,
+            exploration_final_eps=0,
+            target_update_interval=1000,
+            learning_starts=10000,
             buffer_size=100_000,
             batch_size=128,
-            learning_rate=6.3e-4,
-            policy_kwargs=dict(net_arch=[115, 97])
+            learning_rate=6.516183998165423e-05,
+            policy_kwargs=dict(net_arch=[256, 256])
         )
         # PPO
         # sb3_params = dict(
@@ -355,7 +358,7 @@ class SupaSB3:
         #     ent_coef = 0.01,
         # )
 
-        self.total_timesteps = 1_000_000
+        self.total_timesteps = 2_000_000
         self.horizon = 2  # Stack this many states into one
 
         # The model works with indices [0, 3), but the server expects [-1,0,1].
@@ -383,21 +386,13 @@ class SupaSB3:
         env = SupaEnv()
         self.env = HistoryWrapper(env, horizon=self.horizon)
         if not self.load_checkpoint(checkpoint_path):
-            self.model = DQN(
-                CustomDQNPolicy, #"MlpPolicy",
+            self.model = self.model_class(
+                "MlpPolicy", # CustomDQNPolicy
                 self.env,
                 **sb3_params,
                 verbose=2,
                 tensorboard_log=f"runs/{self.experiment_name}",
                 seed=42)
-            # self.model = PPO(
-            #     "MlpPolicy",
-            #     self.env,
-            #     **sb3_params,
-            #     verbose=2,
-            #     tensorboard_log=f"runs/{self.experiment_name}",
-            #     seed=42
-            # )
             self.model._hparams = sb3_params  # Store params for easy logging and saving
         self.learn_thread = None 
 
@@ -456,14 +451,14 @@ class SupaSB3:
             return False
 
         model_path, replay_buffer_path = path
-        self.model = DQN.load(model_path, env=self.env, print_system_info=True)
-        # self.model = PPO.load(model_path, env=self.env, print_system_info=True)
+        self.model = self.model_class.load(model_path, env=self.env, print_system_info=True)
         if replay_buffer_path:
             self.model.load_replay_buffer(replay_buffer_path)
 
         # Restore manually saved env variables
-        self.env.real_episode_scores = self.model._env_real_episode_scores
-        self.env.hparams = self.model._env_hparams
+        self.env.env.real_episode_scores = self.model._env_real_episode_scores
+        self.env.env.hparams = self.model._env_hparams
+        self.model.set_env(self.env)
 
         return True 
 
@@ -505,13 +500,16 @@ def sample_dqn_params(trial: optuna.Trial) -> Dict[str, Any]:
     gamma = trial.suggest_categorical("gamma", [0.9, 0.95, 0.97, 0.99])
     learning_rate = trial.suggest_float("learning_rate", 1e-5, 1, log=True)
     # batch_size = trial.suggest_categorical("batch_size", [16, 32, 64, 128, 256, 512])
-    batch_size = 64
+    batch_size = 128
     # buffer_size = trial.suggest_categorical("buffer_size", [int(1e4), int(5e4), int(1e5)])
     buffer_size = 100_000
 
-    exploration_final_eps = trial.suggest_float("exploration_final_eps", 0, 0.1)
-    exploration_fraction = trial.suggest_float("exploration_fraction", 0, 0.5)
-    target_update_interval = trial.suggest_categorical("target_update_interval", [300, 1000, 5000])
+    exploration_fraction = 0
+    exploration_final_eps = 0
+
+    # exploration_final_eps = trial.suggest_float("exploration_final_eps", 0, 0.1)
+    # exploration_fraction = trial.suggest_float("exploration_fraction", 0, 0.5)
+    target_update_interval = trial.suggest_categorical("target_update_interval", [300, 1000, 5000, 10000])
 
     # train_freq = trial.suggest_categorical("train_freq", [1, 8, 16])
     # subsample_steps = trial.suggest_categorical("subsample_steps", [1, 2])
@@ -519,7 +517,8 @@ def sample_dqn_params(trial: optuna.Trial) -> Dict[str, Any]:
     train_freq = 8
     gradient_steps = -1
 
-    net_arch = trial.suggest_categorical("net_arch", ["tiny", "small", "medium"])
+    # net_arch = trial.suggest_categorical("net_arch", ["tiny", "small", "medium"])
+    net_arch = "medium"
     net_arch = {"tiny": [64], "small": [64, 64], "medium": [256, 256]}[net_arch]
 
     hyperparams = {
@@ -532,22 +531,22 @@ def sample_dqn_params(trial: optuna.Trial) -> Dict[str, Any]:
         "exploration_fraction": exploration_fraction,
         "exploration_final_eps": exploration_final_eps,
         "target_update_interval": target_update_interval,
-        "learning_starts": 100,
+        "learning_starts": 5000,
         "policy_kwargs": dict(net_arch=net_arch),
     }
     return hyperparams
 
 
 def sample_env_params(trial: optuna.Trial) -> Dict[str, Any]:
-    reward_slot_center_amount = trial.suggest_float("reward_slot_center_amount", 0, 1)
+    reward_slot_center_amount = 0 # trial.suggest_float("reward_slot_center_amount", 0, 1)
     reward_far_wall_amount = trial.suggest_float("reward_far_wall_amount", 0, 1)
     # default_reward = trial.suggest_float("default_reward", 0, 1)
-    default_reward = 0.1
-    horizon = trial.suggest_categorical("horizon", [0, 1, 2])
-    # horizon = 2
+    default_reward = 0.0
+    # horizon = trial.suggest_categorical("horizon", [0, 1, 2])
+    horizon = 2
 
     hyperparams = {
-        "reward_slot_center": True,  # Receive reward for being close to the center of a slot
+        "reward_slot_center": False,  # Receive reward for being close to the center of a slot
         "reward_slot_center_amount": reward_slot_center_amount,
         "reward_far_wall": True,  # Receive reward for being on a slot where the wall is far away
         "reward_far_wall_amount": reward_far_wall_amount,
@@ -561,13 +560,13 @@ def sample_env_params(trial: optuna.Trial) -> Dict[str, Any]:
 
 
 class SupaSB3Optuna:
-    def __init__(self, experiment_name="sb3_optuna_14"):
+    def __init__(self, experiment_name="optuna_qrdqn_1"):
         self.experiment_name = experiment_name
 
         self.n_trials = 50
         self.n_startup_trials = 3  # Pruning is disabled until the given number of trials finish in the same study.
         self.eval_freq = 2000  # Report metrics to pruner every this many steps
-        self.total_timesteps = 100_000
+        self.total_timesteps = 50_000
         self.n_warmup_steps = int(self.total_timesteps * 0.3)  # Do not prune before % of the max budget is used
 
         # The model works with indices [0, 3), but the server expects [-1,0,1].
@@ -611,7 +610,7 @@ class SupaSB3Optuna:
             env = SupaEnv(hparams=env_params)
             env = HistoryWrapper(env)
 
-            model = DQN(
+            model = QRDQN(
                 "MlpPolicy",
                 env,
                 **dqn_params,
@@ -646,7 +645,18 @@ class SupaSB3Optuna:
         sampler = optuna.samplers.TPESampler(n_startup_trials=self.n_startup_trials)
         pruner = optuna.pruners.MedianPruner(n_startup_trials=self.n_startup_trials, n_warmup_steps=self.n_warmup_steps)
 
-        study = optuna.create_study(sampler=sampler, pruner=pruner, direction="maximize")
+        storage_path = f"runs/{self.experiment_name}/{self.experiment_name}.db"
+        storage_name = f"sqlite:///{storage_path}"
+        pathlib.Path(storage_path).parent.mkdir(exist_ok=True, parents=True)
+        study = optuna.create_study(sampler=sampler, pruner=pruner, direction="maximize", study_name=self.experiment_name, storage=storage_name, load_if_exists=True)
+
+        # Start with a good initial guess
+        study.enqueue_trial({
+            "gamma": 0.97,
+            'learning_rate': 0.0008195333347828384,
+            'target_update_interval': 300,
+            'reward_far_wall_amount': 0.656756348802928
+        })
         study.optimize(objective, n_trials=self.n_trials)
 
         pruned_trials = study.get_trials(deepcopy=False, states=[optuna.trial.TrialState.PRUNED])

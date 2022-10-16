@@ -121,7 +121,7 @@ bool setting_auto_restart = false;  // automatically restart the game when dead
 bool setting_ai_learning = false;
 bool setting_special_effects = true;
 float setting_speedhack = 1.0f;
-std::array<float, 7> setting_speedhack_options = { 0.5f, 1.0f, 1.5f, 2.0f, 3.0f, 4.0f, 5.0f };
+std::array<float, 12> setting_speedhack_options = { 0.5f, 1.0f, 1.5f, 2.0f, 3.0f, 4.0f, 5.0f, 6.0f, 7.0f, 8.0f, 9.0f, 10.0f };
 
 HMODULE g_dll;
 HWND g_hwnd;
