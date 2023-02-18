@@ -14,7 +14,8 @@ There are 3 different AI bot implementations that can beat the game.
 A hacky teleportation approach, a natural key emulated approach based on custom heuristics and multiple [reinforcement learning](#reinforcement-learning) approaches.
 
 
-https://user-images.githubusercontent.com/9051689/196054151-f7b7d4ba-7a73-4c3a-8275-ff16a50b2e9a.mp4
+https://user-images.githubusercontent.com/9051689/219872267-134cb6a7-b038-4346-9cec-914337b94211.mp4
+
 
 
 ## Hooking features
@@ -36,7 +37,8 @@ The C++ code sends the game's state to the Python server which replies back with
 
 Example of the processed game state:  
 
-https://user-images.githubusercontent.com/9051689/196054134-3bd7aaa3-08a6-4f5f-8a4a-bd3f8588980b.mp4
+https://user-images.githubusercontent.com/9051689/219872284-1a38897d-6c31-45ae-b888-f81511a02205.mp4
+
 
 
 
